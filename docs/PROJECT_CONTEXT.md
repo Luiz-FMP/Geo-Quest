@@ -10,31 +10,31 @@ The project aims to help tourists and local residents discover historical, cultu
 - Tourists who want a guided and playful way to discover a city.
 - Residents looking for active leisure and new nearby places.
 
-## Intended stack
-- Frontend: React web application with game UI and animations.
-- Backend: C# with ASP.NET Core.
-- Map: Google Maps API.
-- Location: browser Geolocation API.
+## Stack and repository scope
+- Backend: C# with ASP.NET Core on .NET 10.
+- Map integration: Google Maps/Places-related services as required by backend features.
+- Location: the client supplies location data needed by backend workflows; browser geolocation belongs to the frontend/client side.
+- Frontend: under separate development and intentionally out of scope for current backend work.
 - Project management: Trello/Kanban.
 
-> Repository reality takes precedence over this intended architecture. At the time this document was created, `main` contained the ASP.NET Core backend scaffold but no React frontend yet.
+The backend repository should expose HTTP APIs and game/application logic. It should not implement UI concerns or depend on Razor views for new functionality.
 
-## MVP capabilities
-1. Show a map based on the player's current location.
-2. Obtain and display nearby real-world POIs.
-3. Convert POIs into game-interactive locations.
-4. Allow selection among three simple chibi-style characters, each with one distinct advantage/attribute.
-5. Let the player select a mission associated with a real location.
-6. Track completion/progression across missions.
-7. Unlock a city boss after the required progress.
-8. Record conquered cities after boss completion.
+## Backend capabilities needed by the MVP
+1. Accept/validate location inputs required by gameplay.
+2. Obtain nearby real-world POIs through the selected provider and normalize them into game POIs.
+3. Expose character data and simple distinct character attributes.
+4. Support mission selection tied to a real location.
+5. Track mission completion/progression.
+6. Apply city boss unlock/completion rules.
+7. Record or expose conquered-city history once persistence requirements are defined.
 
 ## Product principles
 - Real-world exploration is the core mechanic; features should reinforce it.
 - The MVP should remain understandable and demonstrable for an academic project.
-- Prefer a playable end-to-end loop over many unfinished systems.
-- External API failures and denied location permission are normal states and must be handled.
+- Prefer an end-to-end backend flow over many unfinished abstractions.
+- External API failures and invalid/unavailable location inputs are normal states and must be handled.
 - Minimize collection and storage of precise location data.
+- Do not add persistence infrastructure before a concrete requirement needs it.
 
 ## Roadmap snapshot (2026)
 This roadmap comes from the project planning document and is a planning reference, not a source of truth for current implementation status.
@@ -56,6 +56,7 @@ Do not automatically mark roadmap items complete based only on the date. Inspect
 
 ## Out of scope by default
 Unless explicitly requested, avoid spending MVP time on:
+- frontend implementation or restructuring;
 - social networks or chat;
 - multiplayer;
 - complex combat;
@@ -64,10 +65,10 @@ Unless explicitly requested, avoid spending MVP time on:
 - broad achievement systems unrelated to city progression;
 - architecture rewrites that do not unlock an MVP capability.
 
-## Definition of a useful increment
+## Definition of a useful backend increment
 A change is useful when it:
-- advances one MVP capability;
-- has a visible/testable result;
+- advances one backend MVP capability;
+- exposes or supports a testable behavior;
 - handles its main failure state;
 - does not require unrelated refactors;
 - can be explained and demonstrated by the project team.
