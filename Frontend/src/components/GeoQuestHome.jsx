@@ -1,25 +1,57 @@
-import React, { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import GoogleMapDemo from "./GoogleMapDemo";
 
 export default function GeoQuestHome() {
-  const [coords, setCoords] = useState({ lat: -25.4284, lng: -49.2733 });
+  const [coords, setCoords] = useState(null);
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [locationError, setLocationError] = useState(null);
   const [blink, setBlink] = useState(true);
+  const [showMap, setShowMap] = useState(false);
 
   useEffect(() => {
-    const t = setInterval(() => {
-      setCoords((c) => ({
-        lat: c.lat + (Math.random() - 0.5) * 0.0004,
-        lng: c.lng + (Math.random() - 0.5) * 0.0004,
-      }));
-      setBlink((b) => !b);
+    const timer = setInterval(() => {
+      setBlink((currentBlink) => !currentBlink);
     }, 1800);
-    return () => clearInterval(t);
+
+    return () => clearInterval(timer);
   }, []);
+
+  function requestLocation() {
+    if (!navigator.geolocation) {
+      setLocationError("Seu navegador não suporta geolocalização.");
+      return;
+    }
+
+    setIsLoadingLocation(true);
+    setLocationError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+
+        setIsLoadingLocation(false);
+      },
+      () => {
+        setLocationError("Não foi possível obter sua localização.");
+        setIsLoadingLocation(false);
+      },
+    );
+  }
 
   const menuItems = [
     { label: "Jogar", note: "iniciar percurso" },
     { label: "Configurações", note: "ajustes e permissões" },
     { label: "Informações", note: "sobre o jogo" },
   ];
+
+  const gpsStatus = isLoadingLocation
+    ? "BUSCANDO GPS"
+    : coords
+      ? "GPS ATIVO"
+      : "GPS INATIVO";
 
   return (
     <div
@@ -37,16 +69,25 @@ export default function GeoQuestHome() {
         padding: "24px",
       }}
     >
-      {/* Topographic contour background */}
       <svg
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.5 }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          opacity: 0.5,
+        }}
         preserveAspectRatio="none"
         viewBox="0 0 800 800"
       >
-        {[...Array(9)].map((_, i) => (
+        {[...Array(9)].map((_, index) => (
           <path
-            key={i}
-            d={`M -50 ${80 + i * 85} C 150 ${20 + i * 85}, 300 ${150 + i * 85}, 500 ${70 + i * 85} S 850 ${110 + i * 85}, 900 ${60 + i * 85}`}
+            key={index}
+            d={`M -50 ${80 + index * 85} C 150 ${20 + index * 85}, 300 ${
+              150 + index * 85
+            }, 500 ${70 + index * 85} S 850 ${
+              110 + index * 85
+            }, 900 ${60 + index * 85}`}
             fill="none"
             stroke="#26332A"
             strokeWidth="1.5"
@@ -54,7 +95,6 @@ export default function GeoQuestHome() {
         ))}
       </svg>
 
-      {/* Vignette */}
       <div
         style={{
           position: "absolute",
@@ -64,7 +104,6 @@ export default function GeoQuestHome() {
         }}
       />
 
-      {/* Signal indicator */}
       <div
         style={{
           position: "absolute",
@@ -79,11 +118,17 @@ export default function GeoQuestHome() {
           color: "#8A9A8C",
         }}
       >
-        <span style={{ opacity: blink ? 1 : 0.3, transition: "opacity 0.4s" }}>●</span>
-        GPS ATIVO
+        <span
+          style={{
+            opacity: blink ? 1 : 0.3,
+            transition: "opacity 0.4s",
+          }}
+        >
+          ●
+        </span>
+        {gpsStatus}
       </div>
 
-      {/* Coordinates decorative */}
       <div
         style={{
           position: "absolute",
@@ -95,7 +140,21 @@ export default function GeoQuestHome() {
           letterSpacing: "0.03em",
         }}
       >
-        {coords.lat.toFixed(5)}° S&nbsp;&nbsp;{Math.abs(coords.lng).toFixed(5)}° W
+        {isLoadingLocation ? (
+          "BUSCANDO LOCALIZAÇÃO..."
+        ) : locationError ? (
+          locationError.toUpperCase()
+        ) : coords ? (
+          <>
+            {Math.abs(coords.lat).toFixed(5)}°{" "}
+            {coords.lat >= 0 ? "N" : "S"}
+            &nbsp;&nbsp;
+            {Math.abs(coords.lng).toFixed(5)}°{" "}
+            {coords.lng >= 0 ? "E" : "W"}
+          </>
+        ) : (
+          "LOCALIZAÇÃO INDISPONÍVEL"
+        )}
       </div>
 
       <div
@@ -109,24 +168,30 @@ export default function GeoQuestHome() {
           width: "100%",
         }}
       >
-        {/* Compass rose */}
         <svg width="86" height="86" viewBox="0 0 86 86" style={{ marginBottom: 8 }}>
           <circle cx="43" cy="43" r="41" fill="none" stroke="#3A4A3C" strokeWidth="1" />
           <circle cx="43" cy="43" r="30" fill="none" stroke="#3A4A3C" strokeWidth="0.75" />
-          {[0, 90, 180, 270].map((deg) => (
+          {[0, 90, 180, 270].map((degree) => (
             <line
-              key={deg}
+              key={degree}
               x1="43"
               y1="43"
-              x2={43 + 39 * Math.sin((deg * Math.PI) / 180)}
-              y2={43 - 39 * Math.cos((deg * Math.PI) / 180)}
+              x2={43 + 39 * Math.sin((degree * Math.PI) / 180)}
+              y2={43 - 39 * Math.cos((degree * Math.PI) / 180)}
               stroke="#C89B5C"
               strokeWidth="1"
               opacity="0.7"
             />
           ))}
           <polygon points="43,10 48,43 43,76 38,43" fill="#C89B5C" opacity="0.9" />
-          <text x="43" y="8" textAnchor="middle" fill="#8A9A8C" fontSize="7" fontFamily="'IBM Plex Mono', monospace">
+          <text
+            x="43"
+            y="8"
+            textAnchor="middle"
+            fill="#8A9A8C"
+            fontSize="7"
+            fontFamily="'IBM Plex Mono', monospace"
+          >
             N
           </text>
         </svg>
@@ -144,6 +209,7 @@ export default function GeoQuestHome() {
         >
           Geo-Quest
         </h1>
+
         <p
           style={{
             marginTop: 10,
@@ -158,11 +224,22 @@ export default function GeoQuestHome() {
           cada trajeto é uma trilha real
         </p>
 
-        {/* Menu as waypoints */}
+        {showMap && (
+          <div style={{ width: "100%", marginBottom: 28 }}>
+            <GoogleMapDemo />
+          </div>
+        )}
+
         <nav style={{ width: "100%" }}>
-          {menuItems.map((item, i) => (
+          {menuItems.map((item, index) => (
             <button
               key={item.label}
+              onClick={() => {
+                if (item.label === "Jogar") {
+                  requestLocation();
+                  setShowMap(true);
+                }
+              }}
               style={{
                 display: "flex",
                 alignItems: "baseline",
@@ -170,22 +247,22 @@ export default function GeoQuestHome() {
                 width: "100%",
                 background: "transparent",
                 border: "none",
-                borderTop: i === 0 ? "1px solid #2E3B30" : "none",
+                borderTop: index === 0 ? "1px solid #2E3B30" : "none",
                 borderBottom: "1px solid #2E3B30",
                 padding: "18px 4px",
                 cursor: "pointer",
                 color: "#EDE6D3",
                 textAlign: "left",
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderTopColor = "#C89B5C";
-                e.currentTarget.style.borderBottomColor = "#C89B5C";
-                e.currentTarget.querySelector(".label").style.color = "#C89B5C";
+              onMouseEnter={(event) => {
+                event.currentTarget.style.borderTopColor = "#C89B5C";
+                event.currentTarget.style.borderBottomColor = "#C89B5C";
+                event.currentTarget.querySelector(".label").style.color = "#C89B5C";
               }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderTopColor = "#2E3B30";
-                e.currentTarget.style.borderBottomColor = "#2E3B30";
-                e.currentTarget.querySelector(".label").style.color = "#EDE6D3";
+              onMouseLeave={(event) => {
+                event.currentTarget.style.borderTopColor = "#2E3B30";
+                event.currentTarget.style.borderBottomColor = "#2E3B30";
+                event.currentTarget.querySelector(".label").style.color = "#EDE6D3";
               }}
             >
               <span
@@ -198,6 +275,7 @@ export default function GeoQuestHome() {
               >
                 {item.label}
               </span>
+
               <span
                 style={{
                   fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
