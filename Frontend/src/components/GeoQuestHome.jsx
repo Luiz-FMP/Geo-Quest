@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import GoogleMapDemo from "./GoogleMapDemo";
 
 export default function GeoQuestHome() {
   const [coords, setCoords] = useState({ lat: -25.4284, lng: -49.2733 });
   const [blink, setBlink] = useState(true);
+  const [showMap, setShowMap] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -158,6 +160,12 @@ export default function GeoQuestHome() {
           cada trajeto é uma trilha real
         </p>
 
+        {showMap && (
+          <div style={{ width: "100%", marginBottom: 28 }}>
+            <GoogleMapDemo />
+          </div>
+        )}
+
         {/* Menu as waypoints */}
         <nav style={{ width: "100%" }}>
           {menuItems.map((item, i) => (
@@ -176,6 +184,11 @@ export default function GeoQuestHome() {
                 cursor: "pointer",
                 color: "#EDE6D3",
                 textAlign: "left",
+              }}
+              onClick={() => {
+                if (item.label === "Jogar") {
+                  setShowMap(true);
+                }
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.borderTopColor = "#C89B5C";
