@@ -10,6 +10,5 @@ public class Categoria
 
     public string Descricao { get; set; } = string.Empty;
 
-    public ICollection<MissaoConcluida> MissoesConcluidas { get; set; }
-        = new List<MissaoConcluida>();
+    public ICollection<MissaoConcluida> MissoesConcluidas { get; set; } = new List<MissaoConcluida>();
 }
