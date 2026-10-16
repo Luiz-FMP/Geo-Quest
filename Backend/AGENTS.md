@@ -57,7 +57,7 @@ When cleaning scaffold artifacts, prefer a focused change that first establishes
 For backend changes, use the smallest relevant verification available, typically:
 
 ```bash
-dotnet build Backend/MeuSistema.csproj
+dotnet build Backend/GeoQuest.Api.csproj
 ```
 
 Run targeted tests when tests exist. Do not claim a command passed unless it was actually executed successfully.

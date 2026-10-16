@@ -59,7 +59,7 @@ Before editing:
 4. Prefer focused edits over broad refactors.
 
 After editing:
-1. Run `dotnet build Backend/MeuSistema.csproj` when the environment supports it.
+1. Run `dotnet build Backend/GeoQuest.Api.csproj` when the environment supports it.
 2. Run targeted tests when tests exist.
 3. Report what was validated and what could not be validated.
 4. Call out configuration/API-key requirements without exposing secrets.

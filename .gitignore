@@ -486,3 +486,8 @@ frontend/node_modules/
 frontend/dist/
 frontend/build/
 frontend/.env
+
+# SQLite Databases
+*.db
+*.db-shm
+*.db-wal
