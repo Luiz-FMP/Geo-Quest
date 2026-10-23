@@ -1,29 +1,34 @@
-using Microsoft.Asp.NetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using GeoQuest.Api.Data;
 using GeoQuest.Api.Models;
 
-namespace GeoQuest.Api.Controllers{
+namespace GeoQuest.Api.Controllers
+{
     [Route("api/[controller]")]
     [ApiController]
     public class PersonagensController : ControllerBase
     {
         private readonly GeoQuestDbContext _context;
 
-        public PersonagensController(GeoQuestDbContext context){
+        public PersonagensController(GeoQuestDbContext context)
+        {
             _context = context;
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Personagem>>> GetPersonagens(){
+        public async Task<ActionResult<IEnumerable<Personagem>>> GetPersonagens()
+        {
             return await _context.Personagens.ToListAsync();
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Personagem>> GetPersonagens(int id){
+        public async Task<ActionResult<Personagem>> GetPersonagem(int id)
+        {
             var personagem = await _context.Personagens.FindAsync(id);
 
-            if(personagem == null){
+            if (personagem == null)
+            {
                 return NotFound(new { mensagem = "Personagem não encontrado!" });
             }
 
@@ -31,7 +36,8 @@ namespace GeoQuest.Api.Controllers{
         }
 
         [HttpPost]
-        public async Task<ActionResult<Personagem>> PostPersonagem(Personagem personagem){
+        public async Task<ActionResult<Personagem>> PostPersonagem(Personagem personagem)
+        {
             _context.Personagens.Add(personagem);
             await _context.SaveChangesAsync();
 
@@ -39,21 +45,27 @@ namespace GeoQuest.Api.Controllers{
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutPersonagem(int id, Personagem personagem){
-            if(id != personagem.Id){
-                return BadRequest(new { mensagem = "O ID do personagem não corresponde a URL." });
+        public async Task<IActionResult> PutPersonagem(int id, Personagem personagem)
+        {
+            if (id != personagem.Id)
+            {
+                return BadRequest(new { mensagem = "O ID do personagem não corresponde à URL." });
             }
 
             _context.Entry(personagem).State = EntityState.Modified;
 
-            tyr{
+            try
+            {
                 await _context.SaveChangesAsync();
             }
-            catch(DbUpdateConcurrencyException){
-                if(!PersonagemExists(id)){
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!PersonagemExists(id))
+                {
                     return NotFound(new { mensagem = "Personagem não encontrado!" });
                 }
-                else{
+                else
+                {
                     throw;
                 }
             }
@@ -61,21 +73,24 @@ namespace GeoQuest.Api.Controllers{
             return NoContent();
         }
 
-        [HttpDelete ("{id}")]
-        public async Task<IActionResult> DeletePersonagem(int id){
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeletePersonagem(int id)
+        {
             var personagem = await _context.Personagens.FindAsync(id);
-            
-            if(personagem == null){
+
+            if (personagem == null)
+            {
                 return NotFound(new { mensagem = "Personagem não encontrado!" });
             }
 
             _context.Personagens.Remove(personagem);
-            await _context.SaveChangesAsync;
+            await _context.SaveChangesAsync();
 
             return NoContent();
         }
 
-        private bool PersonagemExists(int id){
+        private bool PersonagemExists(int id)
+        {
             return _context.Personagens.Any(e => e.Id == id);
         }
     }
