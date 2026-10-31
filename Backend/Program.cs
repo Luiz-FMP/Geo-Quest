@@ -1,4 +1,6 @@
 using GeoQuest.Api.Data;
+using GeoQuest.Api.Integrations;
+using GeoQuest.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,6 +10,12 @@ builder.Services.AddDbContext<GeoQuestDbContext>(options =>
         builder.Configuration.GetConnectionString("DefaultConnection")
     )
 );
+
+builder.Services.AddSingleton<PlaceCategoryMapper>();
+builder.Services.AddHttpClient<IGooglePlacesClient, GooglePlacesClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

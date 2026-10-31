@@ -1,15 +1,7 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import GeoQuestHome from './components/GeoQuestHome'
+import GeoQuestHome from "./components/GeoQuestHome";
 
 function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <GeoQuestHome/>
-  )
+  return <GeoQuestHome />;
 }
 
-export default App
+export default App;
