@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using GeoQuest.Api.Data;
 
 namespace GeoQuest.Api.Controllers;
 
@@ -6,6 +7,12 @@ namespace GeoQuest.Api.Controllers;
 [Route("api/[controller]")]
 public class StatusController : ControllerBase
 {
+    private readonly GeoQuestDbContext _context;
+
+    public StatusController(GeoQuestDbContext context){
+        _context = context;
+    }
+
     [HttpGet]
     public IActionResult GetStatus()
     {
