@@ -12,10 +12,14 @@ import {
   iniciarSessaoCombate,
   planRouteRandomEncounter,
 } from "../services/CombatEngine";
-import { normalizePlaceRecord } from "../utils/placeCategories";
+import {
+  createHomePlace,
+  normalizePlaceRecord,
+} from "../utils/placeCategories";
 import CombatScreen from "./combat/CombatScreen";
 import PlaceArrivalModal from "./PlaceArrivalModal";
 import PlaceShopModal from "./PlaceShopModal";
+import RecoveryModal from "./RecoveryModal";
 
 const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v2";
 const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
@@ -91,6 +95,17 @@ function createPlaceIconDataUrl(
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 28 28">
     <rect x="4" y="4" width="20" height="20" fill="${color}" stroke="${stroke}" stroke-width="2.5" rx="3" />
     <circle cx="14" cy="14" r="3.5" fill="#161D18" />
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function createHomeIconDataUrl(isSelected = false) {
+  const stroke = isSelected ? "#FFFFFF" : "#FDE047";
+  const size = isSelected ? 34 : 30;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="13" fill="#065F46" stroke="${stroke}" stroke-width="2.5" />
+    <polygon points="16,7 7,15 10,15 10,23 22,23 22,15 25,15" fill="#FDE047" />
+    <rect x="14" y="17" width="4" height="6" fill="#065F46" />
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
@@ -260,6 +275,13 @@ function GameMapContent({
   playerState,
   onRegisterRouteTraversal,
   onUpdatePlayerHp,
+  onDefineHome,
+  onVisitPlace,
+  onHospitalHeal,
+  onLodgingRest,
+  onHomeRest,
+  onCompleteCombatPlace,
+  onReturnToCheckpoint,
 }) {
   const map = useMap();
   const placesLib = useMapsLibrary("places");
@@ -281,17 +303,49 @@ function GameMapContent({
   // Estado de recolhimento/expansão do painel de Locais Próximos (Seção 4)
   const [isPlacesPanelCollapsed, setIsPlacesPanelCollapsed] = useState(false);
 
-  // Estado do combate ativo e da loja aberta (temporários de interface, Seção 13)
+  // Estado do combate ativo, loja aberta e modal de morte/esgotamento (Seção 3, 13)
   const [activeCombatSession, setActiveCombatSession] = useState(null);
   const [activeShopPlace, setActiveShopPlace] = useState(null);
+  const [recoveryMode, setRecoveryMode] = useState(null); // "esgotamento" | "morte" | null
 
   const polylineRef = useRef(null);
   const animationTimerRef = useRef(null);
   const pausedRouteRef = useRef(null);
   const preparedRouteRef = useRef(null);
+  const activeCombatPlaceRef = useRef(null);
+  const homeInitializedRef = useRef(false);
   const spatialCacheRef = useRef(loadSpatialCacheFromSession());
   const allDiscoveredPlacesRef = useRef([]);
   const inFlightCenterRef = useRef(null);
+
+  // Place especial Home (Seção 9): fixo no ponto inicial do jogador
+  const homeLat = playerState?.home?.latitude;
+  const homeLng = playerState?.home?.longitude;
+  const homeCoords = useMemo(() => {
+    if (typeof homeLat === "number" && typeof homeLng === "number") {
+      return {
+        lat: homeLat,
+        lng: homeLng,
+      };
+    }
+    return initialCoords;
+  }, [homeLat, homeLng, initialCoords]);
+
+  const homePlace = useMemo(() => createHomePlace(homeCoords), [homeCoords]);
+
+  useEffect(() => {
+    if (homeInitializedRef.current) return;
+    if (
+      initialCoords &&
+      typeof initialCoords.lat === "number" &&
+      typeof initialCoords.lng === "number" &&
+      !playerState?.home &&
+      onDefineHome
+    ) {
+      homeInitializedRef.current = true;
+      onDefineHome(initialCoords.lat, initialCoords.lng).catch(() => {});
+    }
+  }, [initialCoords, playerState?.home, onDefineHome]);
 
   const charVisual = getCharacterPlaceholder(
     character?.placeholderKey || character?.id || 1,
@@ -565,10 +619,16 @@ function GameMapContent({
 
   const startCombatSession = useCallback(
     async (tipoCombate, targetPlace) => {
+      activeCombatPlaceRef.current =
+        tipoCombate === COMBAT_TYPES.RANDOM ? null : targetPlace || null;
       const sessao = await iniciarSessaoCombate({
         jogadorId: playerState?.id || 1,
         tipoCombate,
         nomeLocal: targetPlace?.name || "Trajeto Urbano",
+        placeId:
+          tipoCombate === COMBAT_TYPES.RANDOM
+            ? null
+            : targetPlace?.id || null,
         cidadeId: 1,
       });
       setActiveCombatSession(sessao);
@@ -576,7 +636,22 @@ function GameMapContent({
     [playerState?.id],
   );
 
-  // Inicia ou retoma a execução dos passos da rota
+  const calculateRouteEnergyCost = useCallback(
+    (distanceKm) => {
+      const safeDist = Math.max(0, Number(distanceKm) || 0);
+      if (safeDist <= 0) return 0;
+      const consumoPorKm =
+        playerState?.atributos?.consumoEnergiaPorKm ??
+        10 / Math.pow(2, (playerState?.atributos?.velocidadeFinal ?? 0) / 100);
+      return Number((safeDist * consumoPorKm).toFixed(2));
+    },
+    [
+      playerState?.atributos?.consumoEnergiaPorKm,
+      playerState?.atributos?.velocidadeFinal,
+    ],
+  );
+
+  // Inicia ou retoma a execução dos passos da rota (com verificação de esgotamento de Energia em movimento — Seção 3.1)
   const runRouteStepAnimation = useCallback(
     (
       steps,
@@ -584,8 +659,20 @@ function GameMapContent({
       destinationPlace,
       encounterPlan = null,
       alreadyTriggeredEncounter = false,
+      routeMeta = null,
     ) => {
       if (!map) return;
+
+      const totalSteps = Math.max(1, steps.length - 1);
+      const totalDistanceKm = routeMeta?.routeDistanceKm ?? 0.01;
+      const totalEnergyCost =
+        routeMeta?.energiaConsumida ??
+        calculateRouteEnergyCost(totalDistanceKm);
+      const startingEnergy = Number(
+        routeMeta?.startingEnergy ??
+          playerState?.atributos?.energiaAtual ??
+          100,
+      );
 
       let currentStep = startStepIndex;
       let triggeredEncounter = alreadyTriggeredEncounter;
@@ -593,6 +680,45 @@ function GameMapContent({
 
       animationTimerRef.current = setInterval(() => {
         currentStep += 1;
+
+        const progressRatio = Math.min(1, currentStep / totalSteps);
+        const consumedSoFar = totalEnergyCost * progressRatio;
+        const remainingEnergy = Number(
+          (startingEnergy - consumedSoFar).toFixed(2),
+        );
+
+        // Seção 3.1: Se a Energia chegar a zero durante a movimentação, interrompe imediatamente e abre interface de esgotamento
+        if (remainingEnergy <= 0 && currentStep < steps.length) {
+          clearInterval(animationTimerRef.current);
+          animationTimerRef.current = null;
+          pausedRouteRef.current = null;
+
+          const stopCoord = steps[currentStep] || playerCoords;
+          setPlayerCoords(stopCoord);
+          setIsMoving(false);
+          clearRoutePolyline();
+          setArrivedPlace(null);
+
+          const partialDistKm = Math.max(
+            0.01,
+            Number((totalDistanceKm * progressRatio).toFixed(3)),
+          );
+          if (onRegisterRouteTraversal) {
+            onRegisterRouteTraversal(
+              partialDistKm,
+              destinationPlace,
+              false,
+            ).catch(() => {});
+          }
+          if (onUpdatePlayerHp) {
+            onUpdatePlayerHp(
+              playerState?.atributos?.vidaAtual ?? 50,
+              0,
+            ).catch(() => {});
+          }
+          setRecoveryMode("esgotamento");
+          return;
+        }
 
         // Verifica se este passo deve pausar a rota para iniciar um combate aleatório (Seção 9.1)
         if (
@@ -612,6 +738,7 @@ function GameMapContent({
             steps,
             currentStep,
             destinationPlace,
+            routeMeta,
           };
 
           startCombatSession(COMBAT_TYPES.RANDOM, destinationPlace);
@@ -629,31 +756,55 @@ function GameMapContent({
           };
           setPlayerCoords(finalCoord);
           setIsMoving(false);
-          setHasArrivedAtPlace(true);
-          setArrivedPlace(destinationPlace);
           map.panTo(finalCoord);
           fetchNearbyPlaces(finalCoord);
+
+          if (onRegisterRouteTraversal) {
+            onRegisterRouteTraversal(totalDistanceKm, destinationPlace, true)
+              .then((result) => {
+                if (result) {
+                  setLastRouteSummary({
+                    distanciaKm: result.distanciaKm ?? totalDistanceKm,
+                    energiaConsumida:
+                      result.energiaConsumida ?? totalEnergyCost,
+                  });
+                }
+                const nextEnergy =
+                  result?.jogador?.atributos?.energiaAtual ?? remainingEnergy;
+                if (nextEnergy <= 0) {
+                  clearRoutePolyline();
+                  setArrivedPlace(null);
+                  setRecoveryMode("esgotamento");
+                } else {
+                  setHasArrivedAtPlace(true);
+                  setArrivedPlace(destinationPlace);
+                }
+              })
+              .catch(() => {
+                setHasArrivedAtPlace(true);
+                setArrivedPlace(destinationPlace);
+              });
+          } else {
+            setHasArrivedAtPlace(true);
+            setArrivedPlace(destinationPlace);
+          }
           return;
         }
 
         setPlayerCoords(steps[currentStep]);
       }, 35);
     },
-    [map, playerCoords, fetchNearbyPlaces, startCombatSession],
-  );
-
-  const calculateRouteEnergyCost = useCallback(
-    (distanceKm) => {
-      const safeDist = Math.max(0, Number(distanceKm) || 0);
-      if (safeDist <= 0) return 0;
-      const consumoPorKm =
-        playerState?.atributos?.consumoEnergiaPorKm ??
-        10 / Math.pow(2, (playerState?.atributos?.velocidadeFinal ?? 0) / 100);
-      return Number((safeDist * consumoPorKm).toFixed(2));
-    },
     [
-      playerState?.atributos?.consumoEnergiaPorKm,
-      playerState?.atributos?.velocidadeFinal,
+      map,
+      playerCoords,
+      playerState?.atributos?.energiaAtual,
+      playerState?.atributos?.vidaAtual,
+      calculateRouteEnergyCost,
+      clearRoutePolyline,
+      onRegisterRouteTraversal,
+      onUpdatePlayerHp,
+      fetchNearbyPlaces,
+      startCombatSession,
     ],
   );
 
@@ -717,7 +868,18 @@ function GameMapContent({
       originCoord,
       explicitDistanceKm = null,
     ) => {
-      if (!map) return;
+      if (!map || recoveryMode) return;
+
+      const currentEnergy = Number(
+        playerState?.atributos?.energiaAtual ?? 100,
+      );
+      if (currentEnergy <= 0) {
+        clearRoutePolyline();
+        stopMovementAnimation();
+        setArrivedPlace(null);
+        setRecoveryMode("esgotamento");
+        return;
+      }
 
       clearRoutePolyline();
       stopMovementAnimation();
@@ -746,19 +908,7 @@ function GameMapContent({
             : directDistKm;
 
       const routeDistanceKm = Math.max(0.01, Number(rawDistanceKm.toFixed(3)));
-
-      if (onRegisterRouteTraversal) {
-        const result = await onRegisterRouteTraversal(
-          routeDistanceKm,
-          destinationPlace,
-        );
-        if (result) {
-          setLastRouteSummary({
-            distanciaKm: result.distanciaKm ?? routeDistanceKm,
-            energiaConsumida: result.energiaConsumida ?? 0,
-          });
-        }
-      }
+      const energiaConsumida = calculateRouteEnergyCost(routeDistanceKm);
 
       const steps = interpolateRoutePoints(pathCoords, 90);
       if (steps.length === 0) {
@@ -767,6 +917,13 @@ function GameMapContent({
           lng: destinationPlace.lng,
         };
         setPlayerCoords(finalCoord);
+        if (onRegisterRouteTraversal) {
+          await onRegisterRouteTraversal(
+            routeDistanceKm,
+            destinationPlace,
+            true,
+          );
+        }
         setHasArrivedAtPlace(true);
         setArrivedPlace(destinationPlace);
         map.panTo(finalCoord);
@@ -780,12 +937,26 @@ function GameMapContent({
         steps.length,
       );
 
-      runRouteStepAnimation(steps, 0, destinationPlace, encounterPlan, false);
+      runRouteStepAnimation(
+        steps,
+        0,
+        destinationPlace,
+        encounterPlan,
+        false,
+        {
+          routeDistanceKm,
+          energiaConsumida,
+          startingEnergy: currentEnergy,
+        },
+      );
     },
     [
       map,
+      recoveryMode,
+      playerState?.atributos?.energiaAtual,
       clearRoutePolyline,
       stopMovementAnimation,
+      calculateRouteEnergyCost,
       onRegisterRouteTraversal,
       fetchNearbyPlaces,
       runRouteStepAnimation,
@@ -794,6 +965,7 @@ function GameMapContent({
 
   const handleGoToPlace = useCallback(
     (targetPlace) => {
+      if (recoveryMode) return;
       const place = targetPlace || arrivedPlace || selectedPlace;
       if (!place) return;
 
@@ -817,54 +989,190 @@ function GameMapContent({
       setArrivedPlace(null);
       drawRouteAndAnimate(pathCoords, place, origin, explicitDistanceKm);
     },
-    [arrivedPlace, selectedPlace, playerCoords, drawRouteAndAnimate],
+    [
+      recoveryMode,
+      arrivedPlace,
+      selectedPlace,
+      playerCoords,
+      drawRouteAndAnimate,
+    ],
   );
 
   const handleFinishCombat = useCallback(
-    (result) => {
+    async (result) => {
       const finishedCombatType = activeCombatSession?.tipoCombate;
+      const combatPlace = activeCombatPlaceRef.current;
+      activeCombatPlaceRef.current = null;
       setActiveCombatSession(null);
 
-      // Atualiza Vida e Energia atuais do jogador após o combate (sem conceder moedas ou itens)
-      if (onUpdatePlayerHp) {
-        const nextHp = Math.max(1, Math.round(result?.hpRestante ?? 1));
-        const nextEnergy =
-          typeof result?.energiaRestante === "number"
-            ? result.energiaRestante
-            : null;
-        onUpdatePlayerHp(nextHp, nextEnergy);
+      const isDefeated =
+        (result?.vitoria === false && !result?.fugiu) ||
+        (typeof result?.hpRestante === "number" && result.hpRestante <= 0);
+
+      const nextHp = isDefeated
+        ? 0
+        : Math.max(1, Math.round(result?.hpRestante ?? 1));
+      const nextEnergy =
+        typeof result?.energiaRestante === "number"
+          ? Math.max(0, result.energiaRestante)
+          : null;
+
+      // Se foi combate de local (Arena ou Boss) ou derrota, persiste conclusão / estado de vida no backend (Seção 3.2, 6, 11)
+      if (
+        onCompleteCombatPlace &&
+        (combatPlace || isDefeated || result?.vitoria)
+      ) {
+        try {
+          await onCompleteCombatPlace({
+            placeId: combatPlace?.id || null,
+            nome: combatPlace?.name || null,
+            categoria: combatPlace?.category || null,
+            subcategoria: combatPlace?.subcategory || null,
+            latitude: combatPlace?.lat ?? null,
+            longitude: combatPlace?.lng ?? null,
+            tipoCombate: finishedCombatType || "arena",
+            vitoria: Boolean(result?.vitoria),
+            hpRestante: nextHp,
+            vidaRestante: nextHp,
+            energiaRestante: nextEnergy,
+            moedasGanhas: Number(result?.moedasGanhas) || 0,
+          });
+        } catch {
+          if (onUpdatePlayerHp) {
+            await onUpdatePlayerHp(nextHp, nextEnergy);
+          }
+        }
+      } else if (onUpdatePlayerHp) {
+        await onUpdatePlayerHp(nextHp, nextEnergy);
       }
 
-      // Se havia uma rota pausada por combate aleatório ("Emboscada"), respeita o estado atual da rota
+      // Seção 3.2: Quando a Vida chegar a zero, interrompe qualquer movimentação e abre a interface de morte
+      if (isDefeated) {
+        pausedRouteRef.current = null;
+        clearRoutePolyline();
+        stopMovementAnimation();
+        setArrivedPlace(null);
+        setRecoveryMode("morte");
+        return;
+      }
+
+      // Se a Energia chegou a zero durante o combate, interrompe movimentação e abre interface de esgotamento
+      if (typeof nextEnergy === "number" && nextEnergy <= 0) {
+        pausedRouteRef.current = null;
+        clearRoutePolyline();
+        stopMovementAnimation();
+        setArrivedPlace(null);
+        setRecoveryMode("esgotamento");
+        return;
+      }
+
+      // Se havia uma rota pausada por combate aleatório ("Emboscada") e o jogador sobreviveu, retoma o deslocamento
       if (
         finishedCombatType === COMBAT_TYPES.RANDOM &&
         pausedRouteRef.current
       ) {
-        const { steps, currentStep, destinationPlace } = pausedRouteRef.current;
+        const { steps, currentStep, destinationPlace, routeMeta } =
+          pausedRouteRef.current;
         pausedRouteRef.current = null;
-
-        if (result?.vitoria === false && !result?.fugiu) {
-          // Em caso de derrota, o deslocamento é interrompido na posição atual da rota
-          clearRoutePolyline();
-          setIsMoving(false);
-          return;
-        }
-
-        // Caso contrário (vitória ou fuga), retoma o deslocamento até o destino da rota
-        runRouteStepAnimation(steps, currentStep, destinationPlace, null, true);
+        runRouteStepAnimation(
+          steps,
+          currentStep,
+          destinationPlace,
+          null,
+          true,
+          routeMeta,
+        );
       }
     },
     [
       activeCombatSession,
+      onCompleteCombatPlace,
       onUpdatePlayerHp,
       clearRoutePolyline,
+      stopMovementAnimation,
       runRouteStepAnimation,
+    ],
+  );
+
+  // Retorno após Morte ou Esgotamento para Checkpoint ou Home (Seção 3.1, 3.2, 4, 9)
+  const handleSelectReturnDestination = useCallback(
+    async (motivo, destino) => {
+      if (!onReturnToCheckpoint) return;
+
+      clearRoutePolyline();
+      stopMovementAnimation();
+      setArrivedPlace(null);
+
+      const response = await onReturnToCheckpoint(motivo, destino);
+      setRecoveryMode(null);
+
+      const destLat =
+        typeof response?.latitude === "number"
+          ? response.latitude
+          : homePlace.lat;
+      const destLng =
+        typeof response?.longitude === "number"
+          ? response.longitude
+          : homePlace.lng;
+      const destCoords = { lat: destLat, lng: destLng };
+
+      setPlayerCoords(destCoords);
+      if (map) {
+        map.panTo(destCoords);
+      }
+      fetchNearbyPlaces(destCoords);
+
+      const targetPlaceId = response?.destinoPlaceId || response?.placeId;
+      const targetName =
+        response?.destinoNome || response?.nomeDestino || "Ponto de Retorno";
+
+      // Identifica o Place de destino para abrir seu menu diretamente na chegada
+      if (destino === "home" || targetPlaceId === "home") {
+        setSelectedPlace(homePlace);
+        setHasArrivedAtPlace(true);
+        setLastRouteSummary({ distanciaKm: 0, energiaConsumida: 0 });
+        setArrivedPlace(homePlace);
+      } else if (targetPlaceId) {
+        const matchedPlace =
+          places.find((p) => p.id === targetPlaceId) ||
+          allDiscoveredPlacesRef.current.find(
+            (p) => p.id === targetPlaceId,
+          ) ||
+          normalizePlaceRecord({
+            id: targetPlaceId,
+            name: targetName,
+            lat: destLat,
+            lng: destLng,
+            primaryType:
+              motivo === "esgotamento"
+                ? playerState?.checkpointEnergia?.subcategoria || "hotel"
+                : playerState?.checkpointVida?.subcategoria || "hospital",
+          });
+
+        if (matchedPlace) {
+          setSelectedPlace(matchedPlace);
+          setHasArrivedAtPlace(true);
+          setLastRouteSummary({ distanciaKm: 0, energiaConsumida: 0 });
+          setArrivedPlace(matchedPlace);
+        }
+      }
+    },
+    [
+      onReturnToCheckpoint,
+      clearRoutePolyline,
+      stopMovementAnimation,
+      homePlace,
+      map,
+      fetchNearbyPlaces,
+      places,
+      playerState?.checkpointEnergia?.subcategoria,
+      playerState?.checkpointVida?.subcategoria,
     ],
   );
 
   const handleSelectPlace = useCallback(
     async (place) => {
-      if (!place || !routesLib || !map) return;
+      if (!place || !routesLib || !map || recoveryMode) return;
 
       stopMovementAnimation();
       setSelectedPlace(place);
@@ -873,7 +1181,7 @@ function GameMapContent({
       const origin = { lat: playerCoords.lat, lng: playerCoords.lng };
       const destination = { lat: place.lat, lng: place.lng };
 
-      // Se o jogador já está neste Place, abre o menu imediatamente com a ação liberada
+      // Se o jogador já está neste Place, abre o menu imediatamente com a ação liberada e registra a visita
       if (haversineDistanceKm(origin, destination) < 0.015) {
         clearRoutePolyline();
         preparedRouteRef.current = null;
@@ -881,6 +1189,9 @@ function GameMapContent({
         setHasArrivedAtPlace(true);
         setLastRouteSummary({ distanciaKm: 0, energiaConsumida: 0 });
         setArrivedPlace(place);
+        if (onVisitPlace && place.id !== "home") {
+          onVisitPlace(place).catch(() => {});
+        }
         return;
       }
 
@@ -1045,10 +1356,12 @@ function GameMapContent({
     [
       routesLib,
       map,
+      recoveryMode,
       playerCoords,
       stopMovementAnimation,
       clearRoutePolyline,
       prepareRoutePreview,
+      onVisitPlace,
     ],
   );
 
@@ -1105,6 +1418,17 @@ function GameMapContent({
             icon={characterSquareIcon}
             zIndex={1000}
           />
+
+          {/* Marcador especial do Home — Ponto inicial do jogador (Seção 9) */}
+          {homePlace && (
+            <Marker
+              position={{ lat: homePlace.lat, lng: homePlace.lng }}
+              title="Home (Local especial — Ponto inicial)"
+              icon={createHomeIconDataUrl(selectedPlace?.id === "home")}
+              zIndex={selectedPlace?.id === "home" ? 700 : 600}
+              onClick={() => handleSelectPlace(homePlace)}
+            />
+          )}
 
           {/* Marcadores dos Places (somente das 10 categorias permitidas) */}
           {places.map((place) => {
@@ -1476,6 +1800,65 @@ function GameMapContent({
                 gap: 8,
               }}
             >
+              {/* Place especial Home fixo no topo da lista (Seção 9) */}
+              {homePlace && (
+                <button
+                  type="button"
+                  data-testid="nearby-place-item-home"
+                  onClick={() => handleSelectPlace(homePlace)}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    width: "100%",
+                    padding: "9px 11px",
+                    background:
+                      selectedPlace?.id === "home" ? "#064E3B" : "#11221B",
+                    border:
+                      selectedPlace?.id === "home"
+                        ? "1px solid #34D399"
+                        : "1px solid rgba(52, 211, 153, 0.45)",
+                    borderRadius: 8,
+                    color: "#EDE6D3",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 12,
+                      height: 12,
+                      marginTop: 3,
+                      borderRadius: "50%",
+                      background: "#10B981",
+                      border: "1.5px solid #FDE047",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ overflow: "hidden" }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#A7F3D0",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Home (Ponto Inicial)
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "'IBM Plex Mono', monospace",
+                        fontSize: 10,
+                        color: "#6EE7B7",
+                      }}
+                    >
+                      Local especial • Descanso Gratuito
+                    </div>
+                  </div>
+                </button>
+              )}
+
               {!isLoadingPlaces && places.length === 0 && !placesError && (
                 <div
                   style={{
@@ -1554,13 +1937,15 @@ function GameMapContent({
         </aside>
       </div>
 
-      {/* Submenu padronizado do Place selecionado (Seções 5, 9.2, 9.3, 10, 11) */}
+      {/* Submenu padronizado do Place selecionado (Seções 5, 7, 8, 9, 10, 11) */}
       <PlaceArrivalModal
+        key={arrivedPlace?.id || "closed"}
         place={arrivedPlace}
         routeSummary={lastRouteSummary}
         hasArrived={hasArrivedAtPlace}
         isCalculatingRoute={isCalculatingRoute}
         playerEnergy={energiaAtual}
+        playerState={playerState}
         onGoToPlace={handleGoToPlace}
         onStartArenaCombat={(targetPlace) => {
           setArrivedPlace(null);
@@ -1574,7 +1959,19 @@ function GameMapContent({
           setArrivedPlace(null);
           setActiveShopPlace(targetPlace);
         }}
+        onHospitalHeal={onHospitalHeal}
+        onLodgingRest={onLodgingRest}
+        onHomeRest={(targetPlace) =>
+          onHomeRest?.(targetPlace?.lat ?? homePlace.lat, targetPlace?.lng ?? homePlace.lng)
+        }
         onClose={() => setArrivedPlace(null)}
+      />
+
+      {/* Interface de Esgotamento (Energia = 0) ou Morte (Vida = 0) — Seção 3 */}
+      <RecoveryModal
+        mode={recoveryMode}
+        playerState={playerState}
+        onSelectReturnDestination={handleSelectReturnDestination}
       />
 
       {/* Interface da Loja (Seção 11) */}
@@ -1619,6 +2016,13 @@ export default function GoogleMapDemo({
   playerState = null,
   onRegisterRouteTraversal,
   onUpdatePlayerHp,
+  onDefineHome,
+  onVisitPlace,
+  onHospitalHeal,
+  onLodgingRest,
+  onHomeRest,
+  onCompleteCombatPlace,
+  onReturnToCheckpoint,
   onExitToMenu,
 }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -1723,6 +2127,13 @@ export default function GoogleMapDemo({
         playerState={playerState}
         onRegisterRouteTraversal={onRegisterRouteTraversal}
         onUpdatePlayerHp={onUpdatePlayerHp}
+        onDefineHome={onDefineHome}
+        onVisitPlace={onVisitPlace}
+        onHospitalHeal={onHospitalHeal}
+        onLodgingRest={onLodgingRest}
+        onHomeRest={onHomeRest}
+        onCompleteCombatPlace={onCompleteCombatPlace}
+        onReturnToCheckpoint={onReturnToCheckpoint}
         onExitToMenu={onExitToMenu}
       />
     </APIProvider>

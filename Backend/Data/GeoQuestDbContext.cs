@@ -21,6 +21,8 @@ public class GeoQuestDbContext : DbContext
     public DbSet<Cidade> Cidades { get; set; }
     public DbSet<Boss> Bosses { get; set; }
     public DbSet<Inimigo> Inimigos { get; set; }
+    public DbSet<EstadoPermanentePlace> EstadosPlaces { get; set; }
+    public DbSet<HistoricoVisitaPlace> HistoricoVisitas { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +110,27 @@ public class GeoQuestDbContext : DbContext
             entity.HasOne(b => b.Jogador)
                 .WithMany(j => j.Buffs)
                 .HasForeignKey(b => b.JogadorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EstadoPermanentePlace>(entity =>
+        {
+            entity.HasIndex(e => new { e.JogadorId, e.PlaceId })
+                .IsUnique();
+
+            entity.HasOne(e => e.Jogador)
+                .WithMany(j => j.EstadosPlaces)
+                .HasForeignKey(e => e.JogadorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HistoricoVisitaPlace>(entity =>
+        {
+            entity.HasIndex(h => new { h.JogadorId, h.Categoria, h.DataVisitaUtc });
+
+            entity.HasOne(h => h.Jogador)
+                .WithMany(j => j.HistoricoVisitas)
+                .HasForeignKey(h => h.JogadorId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

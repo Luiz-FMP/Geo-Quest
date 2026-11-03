@@ -122,7 +122,7 @@ public class PlayerStatsCalculator
             Vantagem: personagem.Vantagem,
             Disponivel: personagem.Disponivel,
             PlaceholderKey: string.IsNullOrWhiteSpace(personagem.PlaceholderKey)
-                ? $"char_{personagem.Id}"
+                ? $"char_{jogador.PersonagemId}"
                 : personagem.PlaceholderKey
         );
 
@@ -186,6 +186,86 @@ public class PlayerStatsCalculator
             UltimaAtualizacaoUtc: statsEntity?.UltimaAtualizacaoUtc ?? DateTime.UtcNow
         );
 
+        PontoMapaDto? homeDto = null;
+        if (jogador.HomeLatitude.HasValue && jogador.HomeLongitude.HasValue)
+        {
+            homeDto = new PontoMapaDto(
+                PlaceId: "home",
+                Nome: "Home",
+                Categoria: "Local especial",
+                Subcategoria: "home",
+                Latitude: jogador.HomeLatitude.Value,
+                Longitude: jogador.HomeLongitude.Value,
+                DataVisitaUtc: jogador.DataCriacao
+            );
+        }
+
+        PontoMapaDto? checkpointVidaDto = null;
+        if (!string.IsNullOrWhiteSpace(jogador.CheckpointVidaPlaceId) &&
+            jogador.CheckpointVidaLatitude.HasValue &&
+            jogador.CheckpointVidaLongitude.HasValue)
+        {
+            checkpointVidaDto = new PontoMapaDto(
+                PlaceId: jogador.CheckpointVidaPlaceId,
+                Nome: string.IsNullOrWhiteSpace(jogador.CheckpointVidaNome) ? "Hospital" : jogador.CheckpointVidaNome,
+                Categoria: jogador.CheckpointVidaCategoria ?? PlaceCategoryMapper.CategoryHealthAndWellness,
+                Subcategoria: jogador.CheckpointVidaSubcategoria ?? "hospital",
+                Latitude: jogador.CheckpointVidaLatitude.Value,
+                Longitude: jogador.CheckpointVidaLongitude.Value,
+                DataVisitaUtc: jogador.CheckpointVidaDataUtc
+            );
+        }
+
+        PontoMapaDto? checkpointEnergiaDto = null;
+        if (!string.IsNullOrWhiteSpace(jogador.CheckpointEnergiaPlaceId) &&
+            jogador.CheckpointEnergiaLatitude.HasValue &&
+            jogador.CheckpointEnergiaLongitude.HasValue)
+        {
+            checkpointEnergiaDto = new PontoMapaDto(
+                PlaceId: jogador.CheckpointEnergiaPlaceId,
+                Nome: string.IsNullOrWhiteSpace(jogador.CheckpointEnergiaNome) ? "Hospedagem" : jogador.CheckpointEnergiaNome,
+                Categoria: jogador.CheckpointEnergiaCategoria ?? PlaceCategoryMapper.CategoryLodging,
+                Subcategoria: jogador.CheckpointEnergiaSubcategoria ?? "lodging",
+                Latitude: jogador.CheckpointEnergiaLatitude.Value,
+                Longitude: jogador.CheckpointEnergiaLongitude.Value,
+                DataVisitaUtc: jogador.CheckpointEnergiaDataUtc
+            );
+        }
+
+        var estadosPlacesDto = (jogador.EstadosPlaces ?? Array.Empty<EstadoPermanentePlace>())
+            .OrderByDescending(e => e.UltimaAtualizacaoUtc)
+            .Select(e => new EstadoPermanentePlaceDto(
+                PlaceId: e.PlaceId,
+                Nome: e.Nome,
+                Categoria: e.Categoria,
+                Subcategoria: e.Subcategoria,
+                Latitude: e.Latitude,
+                Longitude: e.Longitude,
+                Concluido: e.Concluido,
+                CuraGratuitaUtilizada: e.CuraGratuitaUtilizada,
+                LojaEsgotada: e.LojaEsgotada,
+                EstoqueJson: e.EstoqueJson,
+                UltimaAtualizacaoUtc: e.UltimaAtualizacaoUtc
+            ))
+            .ToList();
+
+        var historicoDto = (jogador.HistoricoVisitas ?? Array.Empty<HistoricoVisitaPlace>())
+            .OrderByDescending(h => h.DataVisitaUtc)
+            .Select(h => new HistoricoVisitaPlaceDto(
+                Id: h.Id,
+                PlaceId: h.PlaceId,
+                Nome: h.Nome,
+                Categoria: h.Categoria,
+                Subcategoria: h.Subcategoria,
+                Latitude: h.Latitude,
+                Longitude: h.Longitude,
+                DataVisitaUtc: h.DataVisitaUtc,
+                EstadoInteracao: h.EstadoInteracao,
+                Concluido: h.Concluido,
+                BeneficioGratuitoResgatado: h.BeneficioGratuitoResgatado
+            ))
+            .ToList();
+
         return new JogadorEstadoDto(
             Id: jogador.Id,
             Nome: jogador.Nome,
@@ -197,7 +277,14 @@ public class PlayerStatsCalculator
             Equipamentos: equipamentos,
             Buffs: buffs,
             Estatisticas: estatisticasDto,
-            TotalSlotsMochila: TotalSlotsMochila
+            TotalSlotsMochila: TotalSlotsMochila,
+            Home: homeDto,
+            CheckpointVida: checkpointVidaDto,
+            CheckpointEnergia: checkpointEnergiaDto,
+            PosicaoAtualLatitude: jogador.PosicaoAtualLatitude,
+            PosicaoAtualLongitude: jogador.PosicaoAtualLongitude,
+            EstadosPlaces: estadosPlacesDto,
+            HistoricoVisitas: historicoDto
         );
     }
 

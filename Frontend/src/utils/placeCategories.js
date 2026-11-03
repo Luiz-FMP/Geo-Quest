@@ -21,10 +21,14 @@ export const PLACE_FUNCTIONS = {
   ARENA: "arena",
   SHOP: "shop",
   BOSS: "boss",
+  HOSPITAL: "hospital",
+  LODGING: "lodging",
+  HOME: "home",
   WIP: "wip",
 };
 
 export const SPECIAL_BOSS_SUBCATEGORY = "shopping_mall";
+export const SPECIAL_HOSPITAL_SUBCATEGORY = "general_hospital";
 
 /**
  * Ordem de prioridade centralizada e documentada para classificação quando primaryType
@@ -91,12 +95,12 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.HEALTH_AND_WELLNESS,
     key: "health_and_wellness",
     color: "#10B981",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.HOSPITAL,
+    interactionHint: "Este local permite recuperar sua Vida e funciona como checkpoint caso você seja derrotado.",
+    actionLabel: "CURAR",
     subcategories: [
       "chiropractor", "dental_clinic", "dentist", "doctor", "drugstore",
-      "hospital", "massage", "medical_lab", "pharmacy", "physiotherapist",
+      "general_hospital", "hospital", "massage", "medical_lab", "pharmacy", "physiotherapist",
       "sauna", "skin_care_clinic", "spa", "tanning_studio", "wellness_center", "yoga_studio",
     ],
   },
@@ -147,9 +151,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.LODGING,
     key: "lodging",
     color: "#EAB308",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.LODGING,
+    interactionHint: "Este local permite recuperar sua Energia e funciona como checkpoint caso você fique exausto.",
+    actionLabel: "DESCANSAR",
     subcategories: [
       "bed_and_breakfast", "budget_japanese_inn", "campground", "camping_cabin",
       "cottage", "extended_stay_hotel", "farmstay", "guest_house", "hostel",
@@ -250,7 +254,7 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     normalizedTypes.unshift(normalizedPrimary);
   }
 
-  // Regra 12: 1. Verificar se o Place possui o tipo shopping_mall (prioridade máxima -> Boss)
+  // 1. Verificar se o Place possui o tipo shopping_mall (prioridade máxima -> Boss)
   if (
     normalizedPrimary === SPECIAL_BOSS_SUBCATEGORY ||
     normalizedTypes.includes(SPECIAL_BOSS_SUBCATEGORY)
@@ -261,7 +265,18 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     return buildClassification(shoppingRule, SPECIAL_BOSS_SUBCATEGORY);
   }
 
-  // 2. Utilizar primeiro o primaryType, caso pertença a uma das 10 categorias permitidas
+  // 2. Preservar general_hospital quando presente nos tipos de Health and Wellness (Seção 7.1)
+  if (
+    normalizedPrimary === SPECIAL_HOSPITAL_SUBCATEGORY ||
+    normalizedTypes.includes(SPECIAL_HOSPITAL_SUBCATEGORY)
+  ) {
+    const healthRule = ORDERED_CATEGORY_RULES.find(
+      (r) => r.category === ALLOWED_CATEGORIES.HEALTH_AND_WELLNESS,
+    );
+    return buildClassification(healthRule, SPECIAL_HOSPITAL_SUBCATEGORY);
+  }
+
+  // 3. Utilizar primeiro o primaryType, caso pertença a uma das 10 categorias permitidas
   if (normalizedPrimary) {
     const primaryRule = findRuleForSubcategory(normalizedPrimary);
     if (primaryRule) {
@@ -269,7 +284,7 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     }
   }
 
-  // 3. Caso contrário, buscar nos types válidos seguindo a ordem de prioridade centralizada
+  // 4. Caso contrário, buscar nos types válidos seguindo a ordem de prioridade centralizada
   for (const rule of ORDERED_CATEGORY_RULES) {
     const matched = normalizedTypes.find(
       (t) => t !== "store" && rule.subcategories.includes(t),
@@ -301,8 +316,45 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
   return null;
 }
 
+export function createHomePlace(coords) {
+  if (
+    !coords ||
+    typeof coords.lat !== "number" ||
+    typeof coords.lng !== "number" ||
+    Number.isNaN(coords.lat) ||
+    Number.isNaN(coords.lng)
+  ) {
+    return null;
+  }
+
+  return {
+    id: "home",
+    name: "Home",
+    lat: coords.lat,
+    lng: coords.lng,
+    category: "Local especial",
+    categoryKey: "home",
+    subcategory: "home",
+    rawType: "home",
+    placeFunction: PLACE_FUNCTIONS.HOME,
+    isBossSpecial: false,
+    isHomeSpecial: true,
+    color: "#10B981",
+    interactionHint: "Seu ponto inicial de aventura.",
+    actionLabel: "DESCANSAR GRATUITAMENTE",
+    address: "Ponto inicial de aventura",
+  };
+}
+
 export function normalizePlaceRecord(rawPlace, index = 0) {
   if (!rawPlace) return null;
+
+  if (rawPlace.isHomeSpecial || rawPlace.id === "home" || rawPlace.placeFunction === PLACE_FUNCTIONS.HOME) {
+    return createHomePlace({
+      lat: rawPlace.lat ?? rawPlace.latitude,
+      lng: rawPlace.lng ?? rawPlace.longitude,
+    });
+  }
 
   let lat = null;
   let lng = null;

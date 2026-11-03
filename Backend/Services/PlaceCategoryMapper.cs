@@ -28,10 +28,14 @@ public class PlaceCategoryMapper
     public const string CategoryTransportation = "Transportation";
 
     public const string SpecialBossSubcategory = "shopping_mall";
+    public const string SpecialHospitalSubcategory = "general_hospital";
 
     public const string FunctionArena = "arena";
     public const string FunctionShop = "shop";
     public const string FunctionBoss = "boss";
+    public const string FunctionHospital = "hospital";
+    public const string FunctionLodging = "lodging";
+    public const string FunctionHome = "home";
     public const string FunctionWip = "wip";
 
     /// <summary>
@@ -89,7 +93,7 @@ public class PlaceCategoryMapper
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "chiropractor", "dental_clinic", "dentist", "doctor", "drugstore",
-                "hospital", "massage", "medical_lab", "pharmacy", "physiotherapist",
+                "general_hospital", "hospital", "massage", "medical_lab", "pharmacy", "physiotherapist",
                 "sauna", "skin_care_clinic", "spa", "tanning_studio", "wellness_center", "yoga_studio"
             }
         ),
@@ -178,13 +182,18 @@ public class PlaceCategoryMapper
             normalizedTypes.Insert(0, normalizedPrimary);
         }
 
-        // Regra 12 (Prioridade entre categoria e subcategoria):
-        // 1. Verificar se o Place possui o tipo shopping_mall.
-        // 2. Se possuir, classificar sua função como Boss (Categoria Shopping + subcategoria shopping_mall).
+        // 1. Verificar se o Place possui o tipo shopping_mall (prioridade máxima -> Boss).
         if (string.Equals(normalizedPrimary, SpecialBossSubcategory, StringComparison.OrdinalIgnoreCase) ||
             normalizedTypes.Contains(SpecialBossSubcategory, StringComparer.OrdinalIgnoreCase))
         {
             return BuildResult(CategoryShopping, SpecialBossSubcategory);
+        }
+
+        // 2. Preservar general_hospital quando presente nos tipos de Health and Wellness (Seção 7.1).
+        if (string.Equals(normalizedPrimary, SpecialHospitalSubcategory, StringComparison.OrdinalIgnoreCase) ||
+            normalizedTypes.Contains(SpecialHospitalSubcategory, StringComparer.OrdinalIgnoreCase))
+        {
+            return BuildResult(CategoryHealthAndWellness, SpecialHospitalSubcategory);
         }
 
         // 3. Caso contrário, verificar primeiro o primaryType se pertencer a uma das 10 categorias permitidas.
@@ -198,7 +207,6 @@ public class PlaceCategoryMapper
         }
 
         // 4. Caso não exista primaryType válido, buscar nos tipos da lista seguindo a prioridade centralizada.
-        // Primeiro tenta subcategorias específicas (exceto o tipo genérico "store" quando há subcategoria mais específica).
         foreach (var (category, subcategories) in OrderedCategoryRules)
         {
             var matchedSubcategory = normalizedTypes.FirstOrDefault(
@@ -268,6 +276,30 @@ public class PlaceCategoryMapper
                 IsBossSpecial: false,
                 InteractionHint: "Explore esta loja e confira os produtos disponíveis.",
                 ActionLabel: "LOJA"
+            );
+        }
+
+        if (string.Equals(category, CategoryHealthAndWellness, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryHealthAndWellness,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionHospital,
+                IsBossSpecial: false,
+                InteractionHint: "Este local permite recuperar sua Vida e funciona como checkpoint caso você seja derrotado.",
+                ActionLabel: "CURAR"
+            );
+        }
+
+        if (string.Equals(category, CategoryLodging, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryLodging,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionLodging,
+                IsBossSpecial: false,
+                InteractionHint: "Este local permite recuperar sua Energia e funciona como checkpoint caso você fique exausto.",
+                ActionLabel: "DESCANSAR"
             );
         }
 

@@ -5,6 +5,7 @@ public class IniciarCombateRequest
     public int JogadorId { get; set; }
     public string TipoCombate { get; set; } = "Emboscada"; // "Emboscada", "Arena", "Boss"
     public string NomeLocal { get; set; } = string.Empty;
+    public string? PlaceId { get; set; }
     public int? CidadeId { get; set; }
 }
 
@@ -25,6 +26,7 @@ public class SessaoCombateDto
 {
     public string TipoCombate { get; set; } = string.Empty;
     public string NomeLocal { get; set; } = string.Empty;
+    public string? PlaceId { get; set; }
     public bool PermiteFuga { get; set; }
     public List<List<CombatenteInimigoDto>> Rondas { get; set; } = new();
 }

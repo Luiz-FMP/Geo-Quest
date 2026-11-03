@@ -83,6 +83,7 @@ export function planRouteRandomEncounter(
 function buildFallbackCombatSession({
   tipoCombate = COMBAT_TYPES.RANDOM,
   nomeLocal = "Local Desconhecido",
+  placeId = null,
 }) {
   const basePool = [
     { nome: "Saqueador de Beco", vida: 32, ataque: 8, defesa: 2, velocidade: 11, tipo: "Bandido" },
@@ -115,6 +116,7 @@ function buildFallbackCombatSession({
     return {
       tipoCombate,
       nomeLocal,
+      placeId,
       permiteFuga: true,
       rondas: [ronda],
     };
@@ -139,6 +141,7 @@ function buildFallbackCombatSession({
     return {
       tipoCombate,
       nomeLocal,
+      placeId,
       permiteFuga: false,
       rondas,
     };
@@ -161,6 +164,7 @@ function buildFallbackCombatSession({
   return {
     tipoCombate: COMBAT_TYPES.BOSS,
     nomeLocal,
+    placeId,
     permiteFuga: false,
     rondas: [[capanga, boss]],
   };
@@ -175,12 +179,14 @@ export async function iniciarSessaoCombate({
   jogadorId = 1,
   tipoCombate = COMBAT_TYPES.RANDOM,
   nomeLocal = "Local Desconhecido",
+  placeId = null,
   cidadeId = null,
 }) {
   const payload = {
     jogadorId,
     tipoCombate,
     nomeLocal,
+    placeId,
     cidadeId,
   };
 
@@ -207,7 +213,7 @@ export async function iniciarSessaoCombate({
       if (response.ok) {
         const data = await response.json();
         if (data && Array.isArray(data.rondas) && data.rondas.length > 0) {
-          return data;
+          return { ...data, placeId: data.placeId || placeId };
         }
       }
     } catch {
@@ -215,6 +221,6 @@ export async function iniciarSessaoCombate({
     }
   }
 
-  return buildFallbackCombatSession({ tipoCombate, nomeLocal });
+  return buildFallbackCombatSession({ tipoCombate, nomeLocal, placeId });
 }
 

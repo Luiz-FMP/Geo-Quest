@@ -16,6 +16,7 @@ export default function PlayerSettingsModal({
     1,
     playerState?.atributos?.energiaMaximaFinal ?? 100,
   );
+  const moedasAtuais = playerState?.moedas ?? playerState?.atributos?.moedas ?? 0;
 
   async function handleRecoverHealth() {
     if (!onUpdatePlayerHp || isUpdating) return;
@@ -40,6 +41,21 @@ export default function PlayerSettingsModal({
       setFeedback(`Energia recuperada para ${energiaMaxima}/${energiaMaxima}.`);
     } catch {
       setFeedback("Não foi possível recuperar a energia.");
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  async function handleAddDebugCoins() {
+    if (!onUpdatePlayerHp || isUpdating) return;
+    setIsUpdating(true);
+    setFeedback(null);
+    try {
+      const novoSaldo = moedasAtuais + 100;
+      await onUpdatePlayerHp(vidaAtual, energiaAtual, novoSaldo);
+      setFeedback(`+100 Moedas adicionadas (Saldo: ${novoSaldo}).`);
+    } catch {
+      setFeedback("Não foi possível adicionar moedas de debug.");
     } finally {
       setIsUpdating(false);
     }
@@ -173,14 +189,15 @@ export default function PlayerSettingsModal({
               }}
             >
               Vida: <strong>{vidaAtual}/{vidaFinal}</strong> • Energia:{" "}
-              <strong>{Number(energiaAtual).toFixed(1)}/{energiaMaxima}</strong>
+              <strong>{Number(energiaAtual).toFixed(1)}/{energiaMaxima}</strong>{" "}
+              • Moedas: <strong>{moedasAtuais}</strong>
             </span>
           </div>
 
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
               gap: 10,
             }}
           >
@@ -190,7 +207,7 @@ export default function PlayerSettingsModal({
               disabled={isUpdating}
               onClick={handleRecoverHealth}
               style={{
-                padding: "12px 16px",
+                padding: "12px 14px",
                 background: "#991B1B",
                 border: "1px solid #F87171",
                 borderRadius: 8,
@@ -211,7 +228,7 @@ export default function PlayerSettingsModal({
               disabled={isUpdating}
               onClick={handleRecoverEnergy}
               style={{
-                padding: "12px 16px",
+                padding: "12px 14px",
                 background: "#0369A1",
                 border: "1px solid #38BDF8",
                 borderRadius: 8,
@@ -224,6 +241,27 @@ export default function PlayerSettingsModal({
               }}
             >
               Recuperar energia
+            </button>
+
+            <button
+              type="button"
+              data-testid="debug-add-coins-btn"
+              disabled={isUpdating}
+              onClick={handleAddDebugCoins}
+              style={{
+                padding: "12px 14px",
+                background: "#92400E",
+                border: "1px solid #FBBF24",
+                borderRadius: 8,
+                color: "#FFFFFF",
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: isUpdating ? "not-allowed" : "pointer",
+                opacity: isUpdating ? 0.6 : 1,
+              }}
+            >
+              Adicionar +100 moedas
             </button>
           </div>
 

@@ -3,13 +3,20 @@ import {
   alterarPersonagemJogador,
   atualizarNomeJogador,
   atualizarVidaJogador,
+  concluirCombateLocalJogador,
+  curarEmHospitalJogador,
+  definirHomeJogador,
+  descansarEmHomeJogador,
+  descansarEmHospedagemJogador,
   desequiparItemJogador,
   equiparItemJogador,
   fetchJogadorAtual,
   gerarItemDebugInventario,
   moverItemInventario,
   registrarPercursoJogador,
+  registrarVisitaPlaceJogador,
   removerItemInventario,
+  retornarParaCheckpointJogador,
 } from "../services/playerApi";
 import CharacterSelectScreen from "./CharacterSelectScreen";
 import GoogleMapDemo from "./GoogleMapDemo";
@@ -59,10 +66,78 @@ export default function GeoQuestHome() {
     return updated;
   }, []);
 
-  const handleUpdatePlayerHp = useCallback(async (novaVida, novaEnergia = null) => {
-    const updated = await atualizarVidaJogador(novaVida, novaEnergia);
+  const handleUpdatePlayerHp = useCallback(
+    async (novaVida, novaEnergia = null, novasMoedas = null) => {
+      const updated = await atualizarVidaJogador(novaVida, novaEnergia, novasMoedas);
+      setPlayerState(updated);
+      return updated;
+    },
+    [],
+  );
+
+  const handleDefineHome = useCallback(async (lat, lng) => {
+    const updated = await definirHomeJogador(lat, lng, false);
     setPlayerState(updated);
     return updated;
+  }, []);
+
+  const handleVisitPlace = useCallback(async (place) => {
+    if (!place || !place.id || place.id === "home") return null;
+    const updated = await registrarVisitaPlaceJogador({
+      placeId: place.id,
+      nome: place.name,
+      categoria: place.category,
+      subcategoria: place.subcategory || place.category,
+      latitude: place.lat,
+      longitude: place.lng,
+    });
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleHospitalHeal = useCallback(async (place, tipoCura) => {
+    const updated = await curarEmHospitalJogador({
+      placeId: place.id,
+      nome: place.name,
+      subcategoria: place.subcategory || "hospital",
+      latitude: place.lat,
+      longitude: place.lng,
+      tipoCura,
+    });
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleLodgingRest = useCallback(async (place) => {
+    const updated = await descansarEmHospedagemJogador({
+      placeId: place.id,
+      nome: place.name,
+      subcategoria: place.subcategory || "hotel",
+      latitude: place.lat,
+      longitude: place.lng,
+    });
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleHomeRest = useCallback(async (lat = null, lng = null) => {
+    const updated = await descansarEmHomeJogador(lat, lng);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleCompleteCombatPlace = useCallback(async (payload) => {
+    const updated = await concluirCombateLocalJogador(payload);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleReturnToCheckpoint = useCallback(async (motivo, destino) => {
+    const response = await retornarParaCheckpointJogador(motivo, destino);
+    if (response?.jogador) {
+      setPlayerState(response.jogador);
+    }
+    return response;
   }, []);
 
   const handleMoveItem = useCallback(async (inventarioId, novoSlotIndice, abaDestino) => {
@@ -95,21 +170,24 @@ export default function GeoQuestHome() {
     return updated;
   }, []);
 
-  const handleRegisterRouteTraversal = useCallback(async (distanciaKm, place) => {
-    try {
-      const response = await registrarPercursoJogador(
-        distanciaKm,
-        place?.id || null,
-        place?.name || null,
-      );
-      if (response?.jogador) {
-        setPlayerState(response.jogador);
+  const handleRegisterRouteTraversal = useCallback(
+    async (distanciaKm, place, chegouAoDestino = true) => {
+      try {
+        const response = await registrarPercursoJogador(
+          distanciaKm,
+          place,
+          chegouAoDestino,
+        );
+        if (response?.jogador) {
+          setPlayerState(response.jogador);
+        }
+        return response;
+      } catch {
+        return null;
       }
-      return response;
-    } catch {
-      return null;
-    }
-  }, []);
+    },
+    [],
+  );
 
   function handleStartGame() {
     if (!navigator.geolocation) {
@@ -121,7 +199,7 @@ export default function GeoQuestHome() {
     setLocationError(null);
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const latitude = position?.coords?.latitude;
         const longitude = position?.coords?.longitude;
 
@@ -134,6 +212,12 @@ export default function GeoQuestHome() {
           setLocationError("Dados de localização incompletos retornados pelo navegador.");
           setIsLoadingLocation(false);
           return;
+        }
+
+        try {
+          await handleDefineHome(latitude, longitude);
+        } catch {
+          // Segue com coordenadas locais se necessário
         }
 
         setCoords({
@@ -182,6 +266,13 @@ export default function GeoQuestHome() {
           playerState={playerState}
           onRegisterRouteTraversal={handleRegisterRouteTraversal}
           onUpdatePlayerHp={handleUpdatePlayerHp}
+          onDefineHome={handleDefineHome}
+          onVisitPlace={handleVisitPlace}
+          onHospitalHeal={handleHospitalHeal}
+          onLodgingRest={handleLodgingRest}
+          onHomeRest={handleHomeRest}
+          onCompleteCombatPlace={handleCompleteCombatPlace}
+          onReturnToCheckpoint={handleReturnToCheckpoint}
           onExitToMenu={() => setScreen("menu")}
         />
         <PlayerSystemsOverlay

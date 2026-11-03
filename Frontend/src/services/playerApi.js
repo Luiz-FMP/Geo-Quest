@@ -76,6 +76,13 @@ const DEFAULT_EQUIP_SLOTS = [
   { slotKey: "Arma", rotulo: "Arma", posicaoLayout: "abaixo", itemEquipado: null },
 ];
 
+const TRACKED_HISTORY_CATEGORIES = new Set([
+  "Health and Wellness",
+  "Lodging",
+  "Entertainment and Recreation",
+  "Shopping",
+]);
+
 function createDebugItemInstance(inventarioId = 1, slotIndice = 0) {
   return {
     inventarioId,
@@ -141,18 +148,29 @@ function recalculateState(state) {
     (10 / Math.pow(2, velocidadeFinal / 100)).toFixed(4),
   );
 
-  const vidaAtual = Math.min(
-    vidaFinal,
-    Math.max(0, state.atributos?.vidaAtual ?? vidaFinal),
-  );
+  const rawVidaAtual =
+    state.atributos?.vidaAtual !== undefined && state.atributos?.vidaAtual !== null
+      ? Number(state.atributos.vidaAtual)
+      : vidaFinal;
+  const vidaAtual = Math.min(vidaFinal, Math.max(0, Math.round(rawVidaAtual)));
+
+  const rawEnergiaAtual =
+    state.atributos?.energiaAtual !== undefined && state.atributos?.energiaAtual !== null
+      ? Number(state.atributos.energiaAtual)
+      : energiaMaximaFinal;
   const energiaAtual = Math.min(
     energiaMaximaFinal,
-    Math.max(0, Number((state.atributos?.energiaAtual ?? energiaMaximaFinal).toFixed(2))),
+    Math.max(0, Number(rawEnergiaAtual.toFixed(2))),
   );
 
   return {
     ...state,
     moedas,
+    home: state.home || null,
+    checkpointVida: state.checkpointVida || null,
+    checkpointEnergia: state.checkpointEnergia || null,
+    estadosPlaces: Array.isArray(state.estadosPlaces) ? state.estadosPlaces : [],
+    historicoVisitas: Array.isArray(state.historicoVisitas) ? state.historicoVisitas : [],
     atributos: {
       vidaBase,
       vidaModificador: vidaMod,
@@ -210,6 +228,11 @@ function getOrCreateLocalState() {
     mochila: [createDebugItemInstance(1, 0)],
     equipamentos: DEFAULT_EQUIP_SLOTS,
     buffs: [],
+    home: null,
+    checkpointVida: null,
+    checkpointEnergia: null,
+    estadosPlaces: [],
+    historicoVisitas: [],
     estatisticas: {
       distanciaPercorridaKm: 0,
       placesVisitados: 0,
@@ -233,6 +256,129 @@ function saveLocalState(state) {
     return recalculated;
   } catch {
     return state;
+  }
+}
+
+function upsertLocalPlaceVisitAndState(
+  local,
+  {
+    placeId,
+    nome,
+    categoria,
+    subcategoria,
+    latitude = 0,
+    longitude = 0,
+    estadoInteracao = "Visitado",
+    marcarConcluido = false,
+    marcarCuraGratuita = false,
+    salvarCheckpointDescanso = false,
+  },
+) {
+  if (!placeId || placeId === "home") return;
+
+  if (!Array.isArray(local.estadosPlaces)) {
+    local.estadosPlaces = [];
+  }
+  if (!Array.isArray(local.historicoVisitas)) {
+    local.historicoVisitas = [];
+  }
+
+  const nowIso = new Date().toISOString();
+  let estado = local.estadosPlaces.find((e) => e.placeId === placeId);
+  if (!estado) {
+    estado = {
+      placeId,
+      nome: nome || "Local",
+      categoria: categoria || "",
+      subcategoria: subcategoria || categoria || "",
+      latitude,
+      longitude,
+      concluido: false,
+      curaGratuitaUtilizada: false,
+      lojaEsgotada: false,
+      estoqueJson:
+        categoria === "Shopping" && subcategoria !== "shopping_mall"
+          ? '{"slots":10,"reabastecimento":false}'
+          : null,
+      ultimaAtualizacaoUtc: nowIso,
+    };
+    local.estadosPlaces.push(estado);
+  } else {
+    if (nome) estado.nome = nome;
+    if (categoria) estado.categoria = categoria;
+    if (subcategoria) estado.subcategoria = subcategoria;
+    if (latitude || longitude) {
+      estado.latitude = latitude;
+      estado.longitude = longitude;
+    }
+    estado.ultimaAtualizacaoUtc = nowIso;
+  }
+
+  if (marcarConcluido) {
+    estado.concluido = true;
+  }
+  if (marcarCuraGratuita) {
+    estado.curaGratuitaUtilizada = true;
+  }
+
+  // Atualização independente de checkpoints:
+  // - Health and Wellness: basta visitar o hospital para salvar o Checkpoint de Vida.
+  // - Lodging: é necessário usar o local de descanso (Descansar) para salvar o Checkpoint de Energia.
+  if (categoria === "Health and Wellness") {
+    local.checkpointVida = {
+      placeId,
+      nome: estado.nome,
+      categoria: "Health and Wellness",
+      subcategoria: estado.subcategoria,
+      latitude: estado.latitude,
+      longitude: estado.longitude,
+      dataVisitaUtc: nowIso,
+    };
+  } else if (salvarCheckpointDescanso && categoria === "Lodging") {
+    local.checkpointEnergia = {
+      placeId,
+      nome: estado.nome,
+      categoria: "Lodging",
+      subcategoria: estado.subcategoria,
+      latitude: estado.latitude,
+      longitude: estado.longitude,
+      dataVisitaUtc: nowIso,
+    };
+  }
+
+  // Histórico limitado a 10 locais por categoria (Seção 5)
+  if (!TRACKED_HISTORY_CATEGORIES.has(categoria)) {
+    return;
+  }
+
+  const existingIdx = local.historicoVisitas.findIndex(
+    (h) => h.placeId === placeId && h.categoria === categoria,
+  );
+  const record = {
+    id: existingIdx >= 0 ? local.historicoVisitas[existingIdx].id : Date.now(),
+    placeId,
+    nome: estado.nome,
+    categoria,
+    subcategoria: estado.subcategoria,
+    latitude: estado.latitude,
+    longitude: estado.longitude,
+    dataVisitaUtc: nowIso,
+    estadoInteracao,
+    concluido: estado.concluido,
+    beneficioGratuitoResgatado: estado.curaGratuitaUtilizada,
+  };
+
+  if (existingIdx >= 0) {
+    local.historicoVisitas.splice(existingIdx, 1);
+  }
+  local.historicoVisitas.unshift(record);
+
+  const sameCat = local.historicoVisitas.filter((h) => h.categoria === categoria);
+  if (sameCat.length > 10) {
+    const toRemoveIds = new Set(sameCat.slice(10).map((h) => h.placeId));
+    local.historicoVisitas = local.historicoVisitas.filter(
+      (h) => h.categoria !== categoria || !toRemoveIds.has(h.placeId),
+    );
   }
 }
 
@@ -358,11 +504,18 @@ export async function alterarPersonagemJogador(personagemId) {
   }
 }
 
-export async function atualizarVidaJogador(vidaAtual, energiaAtual = null) {
+export async function atualizarVidaJogador(
+  vidaAtual,
+  energiaAtual = null,
+  moedas = null,
+) {
   const safeVida = Math.max(0, Math.round(Number(vidaAtual) || 0));
   const payload = { vidaAtual: safeVida };
   if (energiaAtual !== null && energiaAtual !== undefined) {
     payload.energiaAtual = Math.max(0, Number(Number(energiaAtual).toFixed(2)) || 0);
+  }
+  if (moedas !== null && moedas !== undefined) {
+    payload.moedas = Math.max(0, Math.round(Number(moedas) || 0));
   }
 
   try {
@@ -380,8 +533,403 @@ export async function atualizarVidaJogador(vidaAtual, energiaAtual = null) {
       const maxEnergia = local.atributos?.energiaMaximaFinal ?? 100;
       local.atributos.energiaAtual = Math.min(maxEnergia, Math.max(0, payload.energiaAtual));
     }
+    if (payload.moedas !== undefined) {
+      local.moedas = payload.moedas;
+      local.atributos.moedas = payload.moedas;
+    }
     local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
     return saveLocalState(local);
+  }
+}
+
+export async function definirHomeJogador(
+  latitude,
+  longitude,
+  forcarAtualizacao = false,
+) {
+  try {
+    const updated = await requestApi("/api/jogadores/atual/home", {
+      method: "POST",
+      body: JSON.stringify({ latitude, longitude, forcarAtualizacao }),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    if (!local.home || forcarAtualizacao) {
+      local.home = {
+        placeId: "home",
+        nome: "Home",
+        categoria: "Local especial",
+        subcategoria: "home",
+        latitude: Number(latitude.toFixed(6)),
+        longitude: Number(longitude.toFixed(6)),
+        dataVisitaUtc: new Date().toISOString(),
+      };
+    }
+    if (!local.posicaoAtualLatitude || !local.posicaoAtualLongitude) {
+      local.posicaoAtualLatitude = local.home.latitude;
+      local.posicaoAtualLongitude = local.home.longitude;
+    }
+    return saveLocalState(local);
+  }
+}
+
+export async function registrarVisitaPlaceJogador({
+  placeId,
+  nome,
+  categoria,
+  subcategoria,
+  latitude = 0,
+  longitude = 0,
+}) {
+  try {
+    const updated = await requestApi("/api/jogadores/atual/visitar-place", {
+      method: "POST",
+      body: JSON.stringify({
+        placeId,
+        nome,
+        categoria,
+        subcategoria,
+        latitude,
+        longitude,
+      }),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    local.posicaoAtualLatitude = latitude;
+    local.posicaoAtualLongitude = longitude;
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome,
+      categoria,
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao: "Visitado",
+    });
+    return saveLocalState(local);
+  }
+}
+
+export async function curarEmHospitalJogador({
+  placeId,
+  nome,
+  subcategoria = "hospital",
+  latitude = 0,
+  longitude = 0,
+  tipoCura = "gratuita",
+}) {
+  try {
+    const updated = await requestApi("/api/jogadores/atual/hospital/curar", {
+      method: "POST",
+      body: JSON.stringify({
+        placeId,
+        nome,
+        subcategoria,
+        latitude,
+        longitude,
+        tipoCura,
+      }),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    const maxVida = local.atributos?.vidaFinal ?? 50;
+    const isGeneralHospital =
+      String(subcategoria || "").toLowerCase() === "general_hospital";
+    const isPaga = String(tipoCura || "").toLowerCase() === "paga";
+
+    const estadoExistente = (local.estadosPlaces || []).find(
+      (e) => e.placeId === placeId,
+    );
+
+    if (!isPaga) {
+      if (estadoExistente?.curaGratuitaUtilizada) {
+        throw new Error("Benefício gratuito já resgatado neste local.", {
+          cause: err,
+        });
+      }
+      const pct = isGeneralHospital ? 0.5 : 0.25;
+      const healAmount = Math.max(1, Math.round(maxVida * pct));
+      local.atributos.vidaAtual = Math.min(
+        maxVida,
+        (local.atributos.vidaAtual ?? 0) + healAmount,
+      );
+      upsertLocalPlaceVisitAndState(local, {
+        placeId,
+        nome,
+        categoria: "Health and Wellness",
+        subcategoria,
+        latitude,
+        longitude,
+        estadoInteracao: "Cura Gratuita Resgatada",
+        marcarCuraGratuita: true,
+      });
+    } else {
+      const moedasAtuais = local.moedas ?? local.atributos?.moedas ?? 0;
+      if (moedasAtuais < 50) {
+        throw new Error(
+          "Você não possui saldo suficiente. São necessárias 50 moedas.",
+          { cause: err },
+        );
+      }
+      local.moedas = moedasAtuais - 50;
+      local.atributos.moedas = local.moedas;
+
+      if (isGeneralHospital) {
+        local.atributos.vidaAtual = maxVida;
+      } else {
+        const healAmount = Math.max(1, Math.round(maxVida * 0.5));
+        local.atributos.vidaAtual = Math.min(
+          maxVida,
+          (local.atributos.vidaAtual ?? 0) + healAmount,
+        );
+      }
+
+      upsertLocalPlaceVisitAndState(local, {
+        placeId,
+        nome,
+        categoria: "Health and Wellness",
+        subcategoria,
+        latitude,
+        longitude,
+        estadoInteracao: "Cura Paga Realizada",
+      });
+    }
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    return saveLocalState(local);
+  }
+}
+
+export async function descansarEmHospedagemJogador({
+  placeId,
+  nome,
+  subcategoria = "hotel",
+  latitude = 0,
+  longitude = 0,
+}) {
+  try {
+    const updated = await requestApi("/api/jogadores/atual/lodging/descansar", {
+      method: "POST",
+      body: JSON.stringify({
+        placeId,
+        nome,
+        subcategoria,
+        latitude,
+        longitude,
+      }),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    const moedasAtuais = local.moedas ?? local.atributos?.moedas ?? 0;
+    if (moedasAtuais < 25) {
+      throw new Error(
+        "Você não possui saldo suficiente. São necessárias 25 moedas.",
+        { cause: err },
+      );
+    }
+
+    local.moedas = moedasAtuais - 25;
+    local.atributos.moedas = local.moedas;
+    local.atributos.energiaAtual = local.atributos?.energiaMaximaFinal ?? 100;
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome,
+      categoria: "Lodging",
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao: "Descanso Realizado",
+      salvarCheckpointDescanso: true,
+    });
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    return saveLocalState(local);
+  }
+}
+
+export async function descansarEmHomeJogador(latitude = null, longitude = null) {
+  try {
+    const updated = await requestApi("/api/jogadores/atual/home/descansar", {
+      method: "POST",
+      body: JSON.stringify({ latitude, longitude }),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    const maxVida = local.atributos?.vidaFinal ?? 50;
+    const recVida = Math.max(1, Math.round(maxVida * 0.5));
+    local.atributos.vidaAtual = Math.min(
+      maxVida,
+      Math.max(1, (local.atributos.vidaAtual ?? 0) + recVida),
+    );
+    local.atributos.energiaAtual = local.atributos?.energiaMaximaFinal ?? 100;
+    if (local.home) {
+      local.posicaoAtualLatitude = local.home.latitude;
+      local.posicaoAtualLongitude = local.home.longitude;
+    }
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    return saveLocalState(local);
+  }
+}
+
+export async function concluirCombateLocalJogador({
+  placeId = null,
+  nome = null,
+  categoria = null,
+  subcategoria = null,
+  latitude = 0,
+  longitude = 0,
+  vitoria = false,
+  hpRestante = null,
+  vidaRestante = null,
+  energiaRestante = null,
+  moedasGanhas = 0,
+}) {
+  const resolvedHpRestante =
+    hpRestante !== null && hpRestante !== undefined ? hpRestante : vidaRestante;
+  const resolvedMoedasGanhas = Math.max(0, Math.round(Number(moedasGanhas) || 0));
+
+  try {
+    const updated = await requestApi("/api/jogadores/atual/combate/concluir-local", {
+      method: "POST",
+      body: JSON.stringify({
+        placeId,
+        nome,
+        categoria,
+        subcategoria,
+        latitude,
+        longitude,
+        vitoria,
+        hpRestante: resolvedHpRestante,
+        energiaRestante,
+        moedasGanhas: resolvedMoedasGanhas,
+      }),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    const maxVida = local.atributos?.vidaFinal ?? 50;
+    const maxEnergia = local.atributos?.energiaMaximaFinal ?? 100;
+
+    if (resolvedHpRestante !== null && resolvedHpRestante !== undefined) {
+      local.atributos.vidaAtual = Math.min(
+        maxVida,
+        Math.max(0, Math.round(Number(resolvedHpRestante))),
+      );
+    }
+    if (energiaRestante !== null && energiaRestante !== undefined) {
+      local.atributos.energiaAtual = Math.min(
+        maxEnergia,
+        Math.max(0, Number(Number(energiaRestante).toFixed(2))),
+      );
+    }
+    if (vitoria && resolvedMoedasGanhas > 0) {
+      local.moedas = Math.max(0, (local.moedas ?? 0) + resolvedMoedasGanhas);
+      local.atributos.moedas = local.moedas;
+    }
+
+    if (placeId && categoria) {
+      upsertLocalPlaceVisitAndState(local, {
+        placeId,
+        nome: nome || "Local de Combate",
+        categoria,
+        subcategoria: subcategoria || categoria,
+        latitude,
+        longitude,
+        estadoInteracao: vitoria ? "Concluído" : "Tentativa de Combate",
+        marcarConcluido: Boolean(vitoria),
+      });
+    }
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    return saveLocalState(local);
+  }
+}
+
+export async function retornarParaCheckpointJogador(motivo, destino) {
+  try {
+    const response = await requestApi("/api/jogadores/atual/retorno-checkpoint", {
+      method: "POST",
+      body: JSON.stringify({ motivo, destino }),
+    });
+    if (response?.jogador) {
+      saveLocalState(response.jogador);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    const maxVida = local.atributos?.vidaFinal ?? 50;
+    const maxEnergia = local.atributos?.energiaMaximaFinal ?? 100;
+    const isEsgotamento = String(motivo).toLowerCase() === "esgotamento";
+    const usarCheckpoint = String(destino).toLowerCase() === "checkpoint";
+
+    let target = {
+      placeId: "home",
+      nome: "Home",
+      categoria: "Local especial",
+      subcategoria: "home",
+      latitude: local.home?.latitude ?? -25.4284,
+      longitude: local.home?.longitude ?? -49.2733,
+    };
+
+    if (isEsgotamento) {
+      if (usarCheckpoint && local.checkpointEnergia) {
+        target = { ...local.checkpointEnergia };
+      }
+      const recVida = Math.max(1, Math.round(maxVida * 0.5));
+      local.atributos.vidaAtual = Math.min(
+        maxVida,
+        Math.max(1, (local.atributos.vidaAtual ?? 0) + recVida),
+      );
+      local.atributos.energiaAtual = 0;
+    } else {
+      if (usarCheckpoint && local.checkpointVida) {
+        target = { ...local.checkpointVida };
+        // Ao voltar para o hospital: recupera 50% de vida para hospitais grandes (general_hospital)
+        // e 25% de vida para os outros, mantendo a energia igual.
+        const isGeneralHospital =
+          String(target.subcategoria || "").toLowerCase() ===
+          "general_hospital";
+        const pct = isGeneralHospital ? 0.5 : 0.25;
+        const recVida = Math.max(1, Math.round(maxVida * pct));
+        local.atributos.vidaAtual = Math.min(maxVida, recVida);
+        // Mantém local.atributos.energiaAtual igual
+      } else {
+        // Ao morrer e retornar para o Home: recupera 50% da Vida total e 100% de Energia (mesma coisa que descansar no Home)
+        const recVida = Math.max(1, Math.round(maxVida * 0.5));
+        local.atributos.vidaAtual = Math.min(maxVida, recVida);
+        local.atributos.energiaAtual = maxEnergia;
+      }
+    }
+
+    local.posicaoAtualLatitude = target.latitude;
+    local.posicaoAtualLongitude = target.longitude;
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+
+    const saved = saveLocalState(local);
+    return {
+      placeId: target.placeId,
+      destinoPlaceId: target.placeId,
+      nomeDestino: target.nome,
+      destinoNome: target.nome,
+      destinoCategoria: target.categoria,
+      destinoSubcategoria: target.subcategoria,
+      latitude: target.latitude,
+      longitude: target.longitude,
+      jogador: saved,
+    };
   }
 }
 
@@ -521,10 +1069,23 @@ export async function desequiparItemJogador(
 
 export async function registrarPercursoJogador(
   distanciaKm,
-  placeId = null,
-  nomeLocal = null,
+  place = null,
+  chegouAoDestino = true,
 ) {
   const safeDistKm = Math.max(0, Number(distanciaKm) || 0);
+  const placeId = typeof place === "object" ? place?.id || null : place;
+  const nomeLocal = typeof place === "object" ? place?.name || null : null;
+  const categoria = typeof place === "object" ? place?.category || null : null;
+  const subcategoria =
+    typeof place === "object" ? place?.subcategory || null : null;
+  const destinoLatitude =
+    typeof place === "object" && typeof place?.lat === "number"
+      ? place.lat
+      : null;
+  const destinoLongitude =
+    typeof place === "object" && typeof place?.lng === "number"
+      ? place.lng
+      : null;
 
   try {
     const response = await requestApi("/api/jogadores/atual/percurso", {
@@ -533,6 +1094,11 @@ export async function registrarPercursoJogador(
         distanciaKm: safeDistKm,
         placeId,
         nomeLocal,
+        categoria,
+        subcategoria,
+        destinoLatitude,
+        destinoLongitude,
+        chegouAoDestino,
       }),
     });
     if (response?.jogador) {
@@ -553,14 +1119,29 @@ export async function registrarPercursoJogador(
     local.estatisticas.distanciaPercorridaKm = Number(
       ((local.estatisticas.distanciaPercorridaKm || 0) + safeDistKm).toFixed(3),
     );
-    local.estatisticas.placesVisitados =
-      (local.estatisticas.placesVisitados || 0) + 1;
+    if (chegouAoDestino) {
+      local.estatisticas.placesVisitados =
+        (local.estatisticas.placesVisitados || 0) + 1;
+    }
     local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+
+    if (chegouAoDestino && placeId && categoria) {
+      upsertLocalPlaceVisitAndState(local, {
+        placeId,
+        nome: nomeLocal || "Local",
+        categoria,
+        subcategoria: subcategoria || categoria,
+        latitude: destinoLatitude || 0,
+        longitude: destinoLongitude || 0,
+        estadoInteracao: "Visitado",
+      });
+    }
 
     const saved = saveLocalState(local);
     return {
       distanciaKm: Number(safeDistKm.toFixed(3)),
       energiaConsumida,
+      esgotado: saved.atributos.energiaAtual <= 0,
       jogador: saved,
     };
   }

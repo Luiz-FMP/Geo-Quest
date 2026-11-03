@@ -22,36 +22,110 @@ public static class DatabaseInitializer
 
         try
         {
-            // Caso o banco já exista da etapa anterior sem a coluna Moedas, adiciona preservando os dados existentes
-            try
-            {
-                _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.Moedas).FirstOrDefaultAsync();
-            }
-            catch
-            {
-                await context.Database.ExecuteSqlRawAsync(
-                    "ALTER TABLE Jogadores ADD COLUMN Moedas INTEGER NOT NULL DEFAULT 0;"
-                );
-            }
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN Moedas INTEGER NOT NULL DEFAULT 0;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN HomeLatitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN HomeLongitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN PosicaoAtualLatitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN PosicaoAtualLongitude REAL NULL;");
 
-            // Verifica se as tabelas/colunas estão presentes no arquivo SQLite existente
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaPlaceId TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaNome TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaCategoria TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaSubcategoria TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaLatitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaLongitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointVidaDataUtc TEXT NULL;");
+
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaPlaceId TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaNome TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaCategoria TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaSubcategoria TEXT NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaLatitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaLongitude REAL NULL;");
+            await EnsureColumnAsync(context, "ALTER TABLE Jogadores ADD COLUMN CheckpointEnergiaDataUtc TEXT NULL;");
+
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS EstadosPlaces (
+                    Id INTEGER NOT NULL CONSTRAINT PK_EstadosPlaces PRIMARY KEY AUTOINCREMENT,
+                    JogadorId INTEGER NOT NULL,
+                    PlaceId TEXT NOT NULL,
+                    Nome TEXT NOT NULL,
+                    Categoria TEXT NOT NULL,
+                    Subcategoria TEXT NOT NULL,
+                    Latitude REAL NOT NULL DEFAULT 0,
+                    Longitude REAL NOT NULL DEFAULT 0,
+                    Concluido INTEGER NOT NULL DEFAULT 0,
+                    CuraGratuitaUtilizada INTEGER NOT NULL DEFAULT 0,
+                    LojaEsgotada INTEGER NOT NULL DEFAULT 0,
+                    EstoqueJson TEXT NULL,
+                    PrimeiraVisitaUtc TEXT NOT NULL,
+                    UltimaAtualizacaoUtc TEXT NOT NULL,
+                    CONSTRAINT FK_EstadosPlaces_Jogadores_JogadorId FOREIGN KEY (JogadorId) REFERENCES Jogadores (Id) ON DELETE CASCADE
+                );
+            ");
+
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_EstadosPlaces_JogadorId_PlaceId
+                ON EstadosPlaces (JogadorId, PlaceId);
+            ");
+
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS HistoricoVisitas (
+                    Id INTEGER NOT NULL CONSTRAINT PK_HistoricoVisitas PRIMARY KEY AUTOINCREMENT,
+                    JogadorId INTEGER NOT NULL,
+                    PlaceId TEXT NOT NULL,
+                    Nome TEXT NOT NULL,
+                    Categoria TEXT NOT NULL,
+                    Subcategoria TEXT NOT NULL,
+                    Latitude REAL NOT NULL DEFAULT 0,
+                    Longitude REAL NOT NULL DEFAULT 0,
+                    DataVisitaUtc TEXT NOT NULL,
+                    EstadoInteracao TEXT NOT NULL,
+                    Concluido INTEGER NOT NULL DEFAULT 0,
+                    BeneficioGratuitoResgatado INTEGER NOT NULL DEFAULT 0,
+                    CONSTRAINT FK_HistoricoVisitas_Jogadores_JogadorId FOREIGN KEY (JogadorId) REFERENCES Jogadores (Id) ON DELETE CASCADE
+                );
+            ");
+
+            await context.Database.ExecuteSqlRawAsync(@"
+                CREATE INDEX IF NOT EXISTS IX_HistoricoVisitas_JogadorId_Categoria_DataVisitaUtc
+                ON HistoricoVisitas (JogadorId, Categoria, DataVisitaUtc);
+            ");
+
+            // Verifica se todas as tabelas/colunas estão presentes no arquivo SQLite
             _ = await context.ItensDefinicao.AnyAsync();
             _ = await context.ItensInventario.AnyAsync();
             _ = await context.BuffsJogador.AnyAsync();
             _ = await context.EstatisticasJogador.AnyAsync();
-            _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.VidaBase).FirstOrDefaultAsync();
-            _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.Moedas).FirstOrDefaultAsync();
+            _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.HomeLatitude).FirstOrDefaultAsync();
+            _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.CheckpointVidaPlaceId).FirstOrDefaultAsync();
+            _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.CheckpointEnergiaPlaceId).FirstOrDefaultAsync();
             _ = await context.Personagens.OrderBy(p => p.Id).Select(p => p.PlaceholderKey).FirstOrDefaultAsync();
             _ = await context.Personagens.OrderBy(p => p.Id).Select(p => p.Velocidade).FirstOrDefaultAsync();
             _ = await context.Personagens.OrderBy(p => p.Id).Select(p => p.Energia).FirstOrDefaultAsync();
             _ = await context.Inimigos.OrderBy(i => i.Id).Select(i => i.Velocidade).FirstOrDefaultAsync();
             _ = await context.Bosses.OrderBy(b => b.Id).Select(b => b.Velocidade).FirstOrDefaultAsync();
+            _ = await context.EstadosPlaces.AnyAsync();
+            _ = await context.HistoricoVisitas.AnyAsync();
         }
         catch
         {
-            // Caso exista um banco antigo incompatível, recria o schema
             await context.Database.EnsureDeletedAsync();
             await context.Database.EnsureCreatedAsync();
+        }
+    }
+
+    private static async Task EnsureColumnAsync(
+        GeoQuestDbContext context,
+        string alterSql)
+    {
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(alterSql);
+        }
+        catch
+        {
+            // Coluna já existe
         }
     }
 
@@ -110,7 +184,6 @@ public static class DatabaseInitializer
         }
         else
         {
-            // Garante que todos os 3 personagens iniciais estejam disponíveis para seleção/troca
             var existentes = await context.Personagens.ToListAsync();
             bool alterou = false;
             foreach (var p in existentes)
@@ -173,7 +246,6 @@ public static class DatabaseInitializer
             }
         }
 
-        // Garante que a definição do Item de Debug exista
         var itemDebugDef = await context.ItensDefinicao
             .FirstOrDefaultAsync(i => i.Codigo == CodigoItemDebug);
 
@@ -200,7 +272,6 @@ public static class DatabaseInitializer
             await context.SaveChangesAsync();
         }
 
-        // Garante inimigos base para Combate Aleatório e Combate de Arena
         if (!await context.Inimigos.AnyAsync())
         {
             context.Inimigos.AddRange(
@@ -235,7 +306,6 @@ public static class DatabaseInitializer
             await context.SaveChangesAsync();
         }
 
-        // Garante cidade e Boss base para Combate de Boss em shopping_mall
         if (!await context.Cidades.AnyAsync())
         {
             context.Cidades.Add(new Cidade
@@ -263,7 +333,6 @@ public static class DatabaseInitializer
             await context.SaveChangesAsync();
         }
 
-        // Garante que o jogador local exista
         var jogadorLocal = await context.Jogadores
             .Include(j => j.Estatisticas)
             .Include(j => j.ItensInventario)

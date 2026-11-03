@@ -89,6 +89,44 @@ public record EstatisticasJogadorDto(
     DateTime UltimaAtualizacaoUtc
 );
 
+public record PontoMapaDto(
+    string PlaceId,
+    string Nome,
+    string Categoria,
+    string Subcategoria,
+    double Latitude,
+    double Longitude,
+    DateTime? DataVisitaUtc = null
+);
+
+public record EstadoPermanentePlaceDto(
+    string PlaceId,
+    string Nome,
+    string Categoria,
+    string Subcategoria,
+    double Latitude,
+    double Longitude,
+    bool Concluido,
+    bool CuraGratuitaUtilizada,
+    bool LojaEsgotada,
+    string? EstoqueJson,
+    DateTime UltimaAtualizacaoUtc
+);
+
+public record HistoricoVisitaPlaceDto(
+    int Id,
+    string PlaceId,
+    string Nome,
+    string Categoria,
+    string Subcategoria,
+    double Latitude,
+    double Longitude,
+    DateTime DataVisitaUtc,
+    string EstadoInteracao,
+    bool Concluido,
+    bool BeneficioGratuitoResgatado
+);
+
 public record JogadorEstadoDto(
     int Id,
     string Nome,
@@ -100,14 +138,21 @@ public record JogadorEstadoDto(
     IReadOnlyList<SlotEquipamentoDto> Equipamentos,
     IReadOnlyList<BuffJogadorDto> Buffs,
     EstatisticasJogadorDto Estatisticas,
-    int TotalSlotsMochila
+    int TotalSlotsMochila,
+    PontoMapaDto? Home = null,
+    PontoMapaDto? CheckpointVida = null,
+    PontoMapaDto? CheckpointEnergia = null,
+    double? PosicaoAtualLatitude = null,
+    double? PosicaoAtualLongitude = null,
+    IReadOnlyList<EstadoPermanentePlaceDto>? EstadosPlaces = null,
+    IReadOnlyList<HistoricoVisitaPlaceDto>? HistoricoVisitas = null
 );
 
 public record AtualizarNomeJogadorRequest(string Nome);
 
 public record AlterarPersonagemRequest(int PersonagemId);
 
-public record AtualizarVidaJogadorRequest(int VidaAtual, double? EnergiaAtual = null);
+public record AtualizarVidaJogadorRequest(int VidaAtual, double? EnergiaAtual = null, int? Moedas = null);
 
 public record MoverItemInventarioRequest(
     int InventarioId,
@@ -128,5 +173,65 @@ public record DesequiparItemRequest(
 public record RegistrarPercursoRequest(
     double DistanciaKm,
     string? PlaceId = null,
-    string? NomeLocal = null
+    string? NomeLocal = null,
+    string? Categoria = null,
+    string? Subcategoria = null,
+    double? DestinoLatitude = null,
+    double? DestinoLongitude = null,
+    bool ChegouAoDestino = true
+);
+
+public record DefinirHomeRequest(
+    double Latitude,
+    double Longitude,
+    bool ForcarAtualizacao = false
+);
+
+public record RegistrarVisitaPlaceRequest(
+    string PlaceId,
+    string Nome,
+    string Categoria,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0
+);
+
+public record CurarHospitalRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0,
+    string TipoCura = "gratuita"
+);
+
+public record DescansarLodgingRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0
+);
+
+public record DescansarHomeRequest(
+    double? Latitude = null,
+    double? Longitude = null
+);
+
+public record ConcluirCombatePlaceRequest(
+    string? PlaceId = null,
+    string? Nome = null,
+    string? Categoria = null,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0,
+    bool Vitoria = true,
+    int? HpRestante = null,
+    double? EnergiaRestante = null,
+    int MoedasGanhas = 0
+);
+
+public record RetornarCheckpointRequest(
+    string Motivo,
+    string Destino
 );
