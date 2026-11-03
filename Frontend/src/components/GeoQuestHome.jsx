@@ -1,14 +1,42 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  alterarPersonagemJogador,
+  atualizarNomeJogador,
+  desequiparItemJogador,
+  equiparItemJogador,
+  fetchJogadorAtual,
+  gerarItemDebugInventario,
+  moverItemInventario,
+  registrarPercursoJogador,
+  removerItemInventario,
+} from "../services/playerApi";
 import CharacterSelectScreen from "./CharacterSelectScreen";
 import GoogleMapDemo from "./GoogleMapDemo";
+import PlayerSystemsOverlay from "./PlayerSystemsOverlay";
 
 export default function GeoQuestHome() {
   const [screen, setScreen] = useState("menu"); // "menu" | "character-select" | "map"
   const [coords, setCoords] = useState(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [locationError, setLocationError] = useState(null);
-  const [selectedCharacter, setSelectedCharacter] = useState(null);
+  const [playerState, setPlayerState] = useState(null);
   const [blink, setBlink] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    fetchJogadorAtual()
+      .then((data) => {
+        if (active && data) {
+          setPlayerState(data);
+        }
+      })
+      .catch(() => {
+        // Caso o backend ainda não esteja rodando, mantém estado local de fallback até conectar
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -16,6 +44,64 @@ export default function GeoQuestHome() {
     }, 1800);
 
     return () => clearInterval(timer);
+  }, []);
+
+  const handleUpdateName = useCallback(async (novoNome) => {
+    const updated = await atualizarNomeJogador(novoNome);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleChangeCharacter = useCallback(async (personagemId) => {
+    const updated = await alterarPersonagemJogador(personagemId);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleMoveItem = useCallback(async (inventarioId, novoSlotIndice, abaDestino) => {
+    const updated = await moverItemInventario(inventarioId, novoSlotIndice, abaDestino);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleDeleteItem = useCallback(async (inventarioId) => {
+    const updated = await removerItemInventario(inventarioId);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleEquipItem = useCallback(async (inventarioId, slotEquipamento) => {
+    const updated = await equiparItemJogador(inventarioId, slotEquipamento);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleUnequipItem = useCallback(async (slotEquipamento, slotMochilaDestino) => {
+    const updated = await desequiparItemJogador(slotEquipamento, slotMochilaDestino);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleSpawnDebugItem = useCallback(async () => {
+    const updated = await gerarItemDebugInventario();
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleRegisterRouteTraversal = useCallback(async (distanciaKm, place) => {
+    try {
+      const response = await registrarPercursoJogador(
+        distanciaKm,
+        place?.id || null,
+        place?.name || null,
+      );
+      if (response?.jogador) {
+        setPlayerState(response.jogador);
+      }
+      return response;
+    } catch {
+      return null;
+    }
   }, []);
 
   function handleStartGame() {
@@ -72,13 +158,36 @@ export default function GeoQuestHome() {
     );
   }
 
+  const currentCharacterObj = playerState?.personagemAtual
+    ? {
+        id: playerState.personagemAtual.id,
+        name: playerState.personagemAtual.nome,
+        placeholderKey: playerState.personagemAtual.placeholderKey,
+      }
+    : { id: 1, name: "Explorador #1", placeholderKey: "char_1" };
+
   if (screen === "map" && coords) {
     return (
-      <GoogleMapDemo
-        initialCoords={coords}
-        character={selectedCharacter || { id: 1, name: "Explorador #1" }}
-        onExitToMenu={() => setScreen("menu")}
-      />
+      <>
+        <GoogleMapDemo
+          initialCoords={coords}
+          character={currentCharacterObj}
+          playerState={playerState}
+          onRegisterRouteTraversal={handleRegisterRouteTraversal}
+          onExitToMenu={() => setScreen("menu")}
+        />
+        <PlayerSystemsOverlay
+          playerState={playerState}
+          coords={coords}
+          onUpdateName={handleUpdateName}
+          onChangeCharacter={handleChangeCharacter}
+          onMoveItem={handleMoveItem}
+          onDeleteItem={handleDeleteItem}
+          onEquipItem={handleEquipItem}
+          onUnequipItem={handleUnequipItem}
+          onSpawnDebugItem={handleSpawnDebugItem}
+        />
+      </>
     );
   }
 
@@ -106,7 +215,7 @@ export default function GeoQuestHome() {
         fontFamily: "'Iowan Old Style', 'Palatino Linotype', Georgia, serif",
         position: "relative",
         overflow: "hidden",
-        padding: "24px",
+        padding: "24px 24px 96px 24px",
       }}
     >
       <svg
@@ -143,6 +252,23 @@ export default function GeoQuestHome() {
             "radial-gradient(ellipse at center, rgba(22,29,24,0) 30%, rgba(22,29,24,0.85) 100%)",
         }}
       />
+
+      {playerState && (
+        <div
+          style={{
+            position: "absolute",
+            top: 20,
+            left: 24,
+            fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
+            fontSize: 11,
+            color: "#C89B5C",
+            zIndex: 3,
+          }}
+        >
+          JOGADOR: <strong>{playerState.nome}</strong> • {playerState.personagemAtual?.nome || "Explorador #1"} • PODER:{" "}
+          <strong>{playerState.atributos?.nivelDePoder ?? 10}</strong>
+        </div>
+      )}
 
       <div
         style={{
@@ -198,9 +324,14 @@ export default function GeoQuestHome() {
       {screen === "character-select" && coords ? (
         <CharacterSelectScreen
           coords={coords}
+          currentCharacterId={playerState?.personagemId || 1}
           onBack={() => setScreen("menu")}
-          onSelectCharacter={(character) => {
-            setSelectedCharacter(character);
+          onSelectCharacter={async (character) => {
+            try {
+              await handleChangeCharacter(character.id);
+            } catch {
+              // Continua mesmo se offline
+            }
             setScreen("map");
           }}
         />
@@ -377,6 +508,19 @@ export default function GeoQuestHome() {
           </nav>
         </div>
       )}
+
+      {/* Botão MENU inferior central e Menus de Tela Cheia (Status, Inventário, Estatísticas, Configurações) */}
+      <PlayerSystemsOverlay
+        playerState={playerState}
+        coords={coords}
+        onUpdateName={handleUpdateName}
+        onChangeCharacter={handleChangeCharacter}
+        onMoveItem={handleMoveItem}
+        onDeleteItem={handleDeleteItem}
+        onEquipItem={handleEquipItem}
+        onUnequipItem={handleUnequipItem}
+        onSpawnDebugItem={handleSpawnDebugItem}
+      />
     </div>
   );
 }

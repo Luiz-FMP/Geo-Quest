@@ -4,108 +4,75 @@ using GeoQuest.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace GeoQuest.Api.Controllers
+namespace GeoQuest.Api.Controllers;
+
+[Route("api/[controller]")]
+[ApiController]
+public class PersonagensController : ControllerBase
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class PersonagensController : ControllerBase
+    private readonly GeoQuestDbContext _context;
+
+    public PersonagensController(GeoQuestDbContext context)
     {
-        private readonly GeoQuestDbContext _context;
+        _context = context;
+    }
 
-        public PersonagensController(GeoQuestDbContext context)
-        {
-            _context = context;
-        }
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<PersonagemResumoDto>>> GetPersonagens(CancellationToken cancellationToken)
+    {
+        var personagens = await _context.Personagens
+            .OrderBy(p => p.Id)
+            .Select(p => new PersonagemResumoDto(
+                p.Id,
+                p.Nome,
+                p.Descricao,
+                p.Vantagem,
+                p.Disponivel,
+                string.IsNullOrWhiteSpace(p.PlaceholderKey) ? $"char_{p.Id}" : p.PlaceholderKey
+            ))
+            .ToListAsync(cancellationToken);
 
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Personagem>>> GetPersonagens()
-        {
-            return await _context.Personagens.ToListAsync();
-        }
+        return Ok(personagens);
+    }
 
-        [HttpGet("slots")]
-        public ActionResult<IEnumerable<CharacterSlotDto>> GetSlots()
+    [HttpGet("slots")]
+    public async Task<ActionResult<IEnumerable<CharacterSlotDto>>> GetSlots(CancellationToken cancellationToken)
+    {
+        var personagens = await _context.Personagens
+            .OrderBy(p => p.Id)
+            .ToListAsync(cancellationToken);
+
+        if (personagens.Count == 0)
         {
-            var slots = new List<CharacterSlotDto>
+            var fallbackSlots = new List<CharacterSlotDto>
             {
-                new(1, "Explorador Urbano", true, "Disponível"),
-                new(2, "Personagem 2", false, "Bloqueado (Em breve)"),
-                new(3, "Personagem 3", false, "Bloqueado (Em breve)")
+                new(1, "Explorador #1", true, "Disponível"),
+                new(2, "Cartógrafo #2", true, "Disponível"),
+                new(3, "Guardião #3", true, "Disponível")
             };
-
-            return Ok(slots);
+            return Ok(fallbackSlots);
         }
 
-        [HttpGet("{id}")]
-        public async Task<ActionResult<Personagem>> GetPersonagem(int id)
+        var slots = personagens.Select(p => new CharacterSlotDto(
+            p.Id,
+            p.Nome,
+            p.Disponivel,
+            p.Disponivel ? (string.IsNullOrWhiteSpace(p.Vantagem) ? "Disponível" : p.Vantagem) : "Bloqueado"
+        ));
+
+        return Ok(slots);
+    }
+
+    [HttpGet("{id}")]
+    public async Task<ActionResult<Personagem>> GetPersonagem(int id, CancellationToken cancellationToken)
+    {
+        var personagem = await _context.Personagens.FindAsync([id], cancellationToken);
+
+        if (personagem == null)
         {
-            var personagem = await _context.Personagens.FindAsync(id);
-
-            if (personagem == null)
-            {
-                return NotFound(new { mensagem = "Personagem não encontrado!" });
-            }
-
-            return personagem;
+            return NotFound(new { mensagem = "Personagem não encontrado!" });
         }
 
-        [HttpPost]
-        public async Task<ActionResult<Personagem>> PostPersonagem(Personagem personagem)
-        {
-            _context.Personagens.Add(personagem);
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction(nameof(GetPersonagem), new { id = personagem.Id }, personagem);
-        }
-
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutPersonagem(int id, Personagem personagem)
-        {
-            if (id != personagem.Id)
-            {
-                return BadRequest(new { mensagem = "O ID do personagem não corresponde à URL." });
-            }
-
-            _context.Entry(personagem).State = EntityState.Modified;
-
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!PersonagemExists(id))
-                {
-                    return NotFound(new { mensagem = "Personagem não encontrado!" });
-                }
-                else
-                {
-                    throw;
-                }
-            }
-
-            return NoContent();
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeletePersonagem(int id)
-        {
-            var personagem = await _context.Personagens.FindAsync(id);
-
-            if (personagem == null)
-            {
-                return NotFound(new { mensagem = "Personagem não encontrado!" });
-            }
-
-            _context.Personagens.Remove(personagem);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
-
-        private bool PersonagemExists(int id)
-        {
-            return _context.Personagens.Any(e => e.Id == id);
-        }
+        return personagem;
     }
 }

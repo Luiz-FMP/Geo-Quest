@@ -12,6 +12,10 @@ public class GeoQuestDbContext : DbContext
 
     public DbSet<Jogador> Jogadores { get; set; }
     public DbSet<Personagem> Personagens { get; set; }
+    public DbSet<ItemDefinicao> ItensDefinicao { get; set; }
+    public DbSet<ItemInventario> ItensInventario { get; set; }
+    public DbSet<BuffJogador> BuffsJogador { get; set; }
+    public DbSet<EstatisticaJogador> EstatisticasJogador { get; set; }
     public DbSet<Categoria> Categorias { get; set; }
     public DbSet<MissaoConcluida> MissoesConcluidas { get; set; }
     public DbSet<Cidade> Cidades { get; set; }
@@ -31,7 +35,9 @@ public class GeoQuestDbContext : DbContext
                 Vida = 120,
                 Ataque = 15,
                 Defesa = 10,
-                Vantagem = "Resistência a dano"
+                Vantagem = "Resistência a dano",
+                Disponivel = true,
+                PlaceholderKey = "char_1"
             },
             new Personagem
             {
@@ -41,7 +47,9 @@ public class GeoQuestDbContext : DbContext
                 Vida = 70,
                 Ataque = 30,
                 Defesa = 3,
-                Vantagem = "Ataques únicos que causam muito dano."
+                Vantagem = "Ataques únicos que causam muito dano.",
+                Disponivel = true,
+                PlaceholderKey = "char_2"
             },
             new Personagem
             {
@@ -51,7 +59,9 @@ public class GeoQuestDbContext : DbContext
                 Vida = 100,
                 Ataque = 10,
                 Defesa = 7,
-                Vantagem = "Múltiplos ataques."
+                Vantagem = "Múltiplos ataques.",
+                Disponivel = true,
+                PlaceholderKey = "char_3"
             },
             new Personagem
             {
@@ -61,8 +71,44 @@ public class GeoQuestDbContext : DbContext
                 Vida = 75,
                 Ataque = 20,
                 Defesa = 5,
-                Vantagem = "Dano em área."
-            } 
+                Vantagem = "Dano em área.",
+                Disponivel = true,
+                PlaceholderKey = "char_4"
+            }
         );
+
+        modelBuilder.Entity<Jogador>(entity =>
+        {
+            entity.HasOne(j => j.Personagem)
+                .WithMany(p => p.Jogadores)
+                .HasForeignKey(j => j.PersonagemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(j => j.Estatisticas)
+                .WithOne(e => e.Jogador)
+                .HasForeignKey<EstatisticaJogador>(e => e.JogadorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ItemInventario>(entity =>
+        {
+            entity.HasOne(i => i.Jogador)
+                .WithMany(j => j.ItensInventario)
+                .HasForeignKey(i => i.JogadorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(i => i.ItemDefinicao)
+                .WithMany()
+                .HasForeignKey(i => i.ItemDefinicaoId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BuffJogador>(entity =>
+        {
+            entity.HasOne(b => b.Jogador)
+                .WithMany(j => j.Buffs)
+                .HasForeignKey(b => b.JogadorId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

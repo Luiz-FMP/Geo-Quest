@@ -1,30 +1,66 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getCharacterPlaceholder } from "../config/placeholderAssets";
+import { fetchPersonagensDisponiveis } from "../services/playerApi";
 
-const CHARACTER_SLOTS = [
+const DEFAULT_CHARACTER_SLOTS = [
   {
     id: 1,
     name: "Explorador #1",
-    subtitle: "Disponível nesta versão",
+    subtitle: "Especialista em trilhas urbanas",
     unlocked: true,
+    placeholderKey: "char_1",
   },
   {
     id: 2,
-    name: "Personagem #2",
-    subtitle: "Bloqueado (Placeholder)",
-    unlocked: false,
+    name: "Cartógrafo #2",
+    subtitle: "Mapeamento tático de pontos históricos",
+    unlocked: true,
+    placeholderKey: "char_2",
   },
   {
     id: 3,
-    name: "Personagem #3",
-    subtitle: "Bloqueado (Placeholder)",
-    unlocked: false,
+    name: "Guardião #3",
+    subtitle: "Expedições longas e defesa",
+    unlocked: true,
+    placeholderKey: "char_3",
   },
 ];
 
-export default function CharacterSelectScreen({ coords, onSelectCharacter, onBack }) {
-  const [selectedId, setSelectedId] = useState(1);
+export default function CharacterSelectScreen({
+  coords,
+  currentCharacterId = 1,
+  confirmLabel = "Confirmar e Abrir Mapa",
+  headerBadge = "Etapa Inicial • Preparação",
+  onSelectCharacter,
+  onBack,
+}) {
+  const [slots, setSlots] = useState(DEFAULT_CHARACTER_SLOTS);
+  const [selectedId, setSelectedId] = useState(() => currentCharacterId || 1);
 
-  const selectedCharacter = CHARACTER_SLOTS.find((c) => c.id === selectedId);
+  useEffect(() => {
+    let active = true;
+    fetchPersonagensDisponiveis()
+      .then((list) => {
+        if (!active || !Array.isArray(list) || list.length === 0) return;
+        const mapped = list.map((p) => ({
+          id: p.id,
+          name: p.nome,
+          subtitle: p.descricao || p.vantagem || "Disponível",
+          unlocked: p.disponivel !== false,
+          placeholderKey: p.placeholderKey || `char_${p.id}`,
+        }));
+        setSlots(mapped);
+      })
+      .catch(() => {
+        // Mantém fallback local caso o backend esteja indisponível
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedCharacter =
+    slots.find((c) => c.id === selectedId) || slots[0];
 
   return (
     <div
@@ -48,7 +84,7 @@ export default function CharacterSelectScreen({ coords, onSelectCharacter, onBac
           marginBottom: 8,
         }}
       >
-        Etapa Inicial • Preparação
+        {headerBadge}
       </span>
 
       <h2
@@ -73,7 +109,9 @@ export default function CharacterSelectScreen({ coords, onSelectCharacter, onBac
           textAlign: "center",
         }}
       >
-        Localização inicial definida ({coords.lat.toFixed(4)}, {coords.lng.toFixed(4)})
+        {coords
+          ? `Localização definida (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`
+          : "Selecione o personagem ativo do seu perfil"}
       </p>
 
       <div
@@ -85,8 +123,9 @@ export default function CharacterSelectScreen({ coords, onSelectCharacter, onBac
           marginBottom: 28,
         }}
       >
-        {CHARACTER_SLOTS.map((slot) => {
+        {slots.map((slot) => {
           const isSelected = slot.id === selectedId;
+          const visual = getCharacterPlaceholder(slot.placeholderKey || slot.id);
 
           if (!slot.unlocked) {
             return (
@@ -173,16 +212,25 @@ export default function CharacterSelectScreen({ coords, onSelectCharacter, onBac
               }}
             >
               <div
-                title="Representação inicial do personagem (quadrado azul)"
+                title={visual.shapeLabel}
                 style={{
                   width: 52,
                   height: 52,
-                  background: "#2563EB",
-                  border: "3px solid #93C5FD",
-                  boxShadow: "0 0 16px rgba(37, 99, 235, 0.55)",
+                  background: visual.color,
+                  border: `3px solid ${visual.borderColor}`,
+                  boxShadow: `0 0 16px ${visual.glow}`,
                   marginBottom: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "#FFFFFF",
                 }}
-              />
+              >
+                {visual.badgeText}
+              </div>
 
               <div
                 style={{
@@ -257,10 +305,9 @@ export default function CharacterSelectScreen({ coords, onSelectCharacter, onBac
             cursor: "pointer",
           }}
         >
-          Confirmar e Abrir Mapa
+          {confirmLabel}
         </button>
       </div>
     </div>
   );
 }
-

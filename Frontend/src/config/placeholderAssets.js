@@ -1,0 +1,128 @@
+/**
+ * Centraliza todos os placeholders visuais (personagens, itens, ícones de menu, slots e raridades)
+ * para manter a lógica de negócio desacoplada de caminhos de imagem/assets definitivos.
+ */
+
+export const MENU_PLACEHOLDER_ICONS = {
+  status: {
+    symbol: "◈",
+    shortLabel: "STS",
+    title: "Status do Jogador",
+  },
+  inventory: {
+    symbol: "▣",
+    shortLabel: "INV",
+    title: "Inventário e Equipamentos",
+  },
+  statistics: {
+    symbol: "▤",
+    shortLabel: "EST",
+    title: "Estatísticas da Jornada",
+  },
+  settings: {
+    symbol: "⚙",
+    shortLabel: "CFG",
+    title: "Configurações",
+  },
+};
+
+export const CHARACTER_PLACEHOLDERS = {
+  char_1: {
+    id: 1,
+    color: "#2563EB",
+    borderColor: "#93C5FD",
+    glow: "rgba(37, 99, 235, 0.55)",
+    badgeText: "EXP-01",
+    shapeLabel: "Quadrado Azul (Placeholder)",
+  },
+  char_2: {
+    id: 2,
+    color: "#10B981",
+    borderColor: "#6EE7B7",
+    glow: "rgba(16, 185, 129, 0.55)",
+    badgeText: "CRT-02",
+    shapeLabel: "Quadrado Esmeralda (Placeholder)",
+  },
+  char_3: {
+    id: 3,
+    color: "#D97706",
+    borderColor: "#FCD34D",
+    glow: "rgba(217, 119, 6, 0.55)",
+    badgeText: "GRD-03",
+    shapeLabel: "Quadrado Âmbar (Placeholder)",
+  },
+};
+
+export function getCharacterPlaceholder(placeholderKeyOrId) {
+  if (typeof placeholderKeyOrId === "number") {
+    return (
+      CHARACTER_PLACEHOLDERS[`char_${placeholderKeyOrId}`] ||
+      CHARACTER_PLACEHOLDERS.char_1
+    );
+  }
+  return (
+    CHARACTER_PLACEHOLDERS[placeholderKeyOrId] || CHARACTER_PLACEHOLDERS.char_1
+  );
+}
+
+export const RARITY_VISUALS = {
+  Comum: {
+    color: "#9CA3AF",
+    border: "#4B5563",
+    bg: "rgba(156, 163, 175, 0.14)",
+  },
+  Incomum: {
+    color: "#34D399",
+    border: "#059669",
+    bg: "rgba(52, 211, 153, 0.14)",
+  },
+  Raro: {
+    color: "#38BDF8",
+    border: "#0284C7",
+    bg: "rgba(56, 189, 248, 0.16)",
+  },
+  Épico: {
+    color: "#C084FC",
+    border: "#9333EA",
+    bg: "rgba(192, 132, 252, 0.16)",
+  },
+  Lendário: {
+    color: "#FBBF24",
+    border: "#D97706",
+    bg: "rgba(251, 191, 36, 0.18)",
+  },
+};
+
+export function getRarityVisual(raridade) {
+  return RARITY_VISUALS[raridade] || RARITY_VISUALS.Comum;
+}
+
+export const ITEM_PLACEHOLDERS = {
+  item_debug: {
+    code: "DBG",
+    symbol: "❖",
+    accent: "#38BDF8",
+  },
+  item_placeholder: {
+    code: "ITM",
+    symbol: "◆",
+    accent: "#C89B5C",
+  },
+};
+
+export function getItemPlaceholder(placeholderKey) {
+  return (
+    ITEM_PLACEHOLDERS[placeholderKey] || ITEM_PLACEHOLDERS.item_placeholder
+  );
+}
+
+export const EQUIPMENT_SLOT_PLACEHOLDERS = {
+  Cabeca: { code: "CAB", label: "Cabeça", position: "side" },
+  Superior: { code: "SUP", label: "Superior", position: "side" },
+  Inferior: { code: "INF", label: "Inferior", position: "side" },
+  Maos: { code: "MAO", label: "Mãos", position: "side" },
+  Botas: { code: "BOT", label: "Botas", position: "side" },
+  Acessorio: { code: "ACE", label: "Acessório", position: "side" },
+  Arma: { code: "ARM", label: "Arma", position: "bottom" },
+};
+

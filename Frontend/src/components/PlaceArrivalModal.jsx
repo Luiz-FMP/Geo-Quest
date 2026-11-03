@@ -1,4 +1,4 @@
-export default function PlaceArrivalModal({ place, onClose }) {
+export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
   if (!place) return null;
 
   return (
@@ -58,18 +58,43 @@ export default function PlaceArrivalModal({ place, onClose }) {
 
         <div
           style={{
-            display: "inline-block",
-            padding: "5px 10px",
-            borderRadius: 6,
-            background: "#26332A",
-            border: `1px solid ${place.color || "#C89B5C"}`,
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 12,
-            color: "#EDE6D3",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
             marginBottom: 14,
           }}
         >
-          Tipo: {place.category || "Ponto de Interesse"}
+          <div
+            style={{
+              display: "inline-block",
+              padding: "5px 10px",
+              borderRadius: 6,
+              background: "#26332A",
+              border: `1px solid ${place.color || "#C89B5C"}`,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              color: "#EDE6D3",
+            }}
+          >
+            Tipo: {place.category || "Ponto de Interesse"}
+          </div>
+
+          {routeSummary && (
+            <div
+              style={{
+                display: "inline-block",
+                padding: "5px 10px",
+                borderRadius: 6,
+                background: "#13293D",
+                border: "1px solid #38BDF8",
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 12,
+                color: "#38BDF8",
+              }}
+            >
+              Rota: {Number(routeSummary.distanciaKm || 0).toFixed(2)} km • -{Number(routeSummary.energiaConsumida || 0).toFixed(2)} Energia
+            </div>
+          )}
         </div>
 
         {place.address && (
@@ -123,4 +148,3 @@ export default function PlaceArrivalModal({ place, onClose }) {
     </div>
   );
 }
-

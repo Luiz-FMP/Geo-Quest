@@ -6,8 +6,13 @@ import {
   useMap,
   useMapsLibrary,
 } from "@vis.gl/react-google-maps";
+import { getCharacterPlaceholder } from "../config/placeholderAssets";
 import { normalizePlaceRecord } from "../utils/placeCategories";
 import PlaceArrivalModal from "./PlaceArrivalModal";
+
+const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v1";
+const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
 
 const GAME_MAP_STYLES = [
   { elementType: "geometry", stylers: [{ color: "#1d2c22" }] },
@@ -59,9 +64,9 @@ const GAME_MAP_STYLES = [
   },
 ];
 
-function createBlueSquareDataUrl() {
+function createCharacterSquareDataUrl(fillColor = "#2563EB", strokeColor = "#DBEAFE") {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-    <rect x="3" y="3" width="26" height="26" fill="#2563EB" stroke="#DBEAFE" stroke-width="3" rx="2" />
+    <rect x="3" y="3" width="26" height="26" fill="${fillColor}" stroke="${strokeColor}" stroke-width="3" rx="2" />
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
@@ -112,6 +117,82 @@ function decodeEncodedPolyline(encoded) {
   return points;
 }
 
+function haversineDistanceKm(a, b) {
+  if (!a || !b) return 0;
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      sinLng * sinLng;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function calculatePathDistanceKm(points) {
+  if (!Array.isArray(points) || points.length < 2) return 0;
+  let totalKm = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    totalKm += haversineDistanceKm(points[i], points[i + 1]);
+  }
+  return Number(totalKm.toFixed(3));
+}
+
+function sortPlacesByProximity(placesList, centerCoords, maxResults = 18) {
+  if (!Array.isArray(placesList)) return [];
+  const seen = new Set();
+  const unique = [];
+  for (const p of placesList) {
+    if (!p || !p.id || seen.has(p.id)) continue;
+    seen.add(p.id);
+    unique.push(p);
+  }
+  return unique
+    .map((p) => ({
+      ...p,
+      distanceFromCenterKm: haversineDistanceKm(centerCoords, {
+        lat: p.lat,
+        lng: p.lng,
+      }),
+    }))
+    .filter((p) => p.distanceFromCenterKm <= 1.6)
+    .sort((a, b) => a.distanceFromCenterKm - b.distanceFromCenterKm)
+    .slice(0, maxResults);
+}
+
+function loadSpatialCacheFromSession() {
+  try {
+    const raw = sessionStorage.getItem(PLACES_CACHE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const now = Date.now();
+    return parsed.filter(
+      (entry) =>
+        entry &&
+        entry.center &&
+        Array.isArray(entry.places) &&
+        now - (entry.timestamp || 0) < CACHE_TTL_MS,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveSpatialCacheToSession(entries) {
+  try {
+    sessionStorage.setItem(
+      PLACES_CACHE_STORAGE_KEY,
+      JSON.stringify(entries.slice(-15)),
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 function interpolateRoutePoints(rawPoints, totalSteps = 90) {
   if (!Array.isArray(rawPoints) || rawPoints.length === 0) return [];
   if (rawPoints.length === 1) return [rawPoints[0]];
@@ -158,7 +239,13 @@ function interpolateRoutePoints(rawPoints, totalSteps = 90) {
   return interpolated;
 }
 
-function GameMapContent({ initialCoords, character, onExitToMenu }) {
+function GameMapContent({
+  initialCoords,
+  character,
+  playerState,
+  onRegisterRouteTraversal,
+  onExitToMenu,
+}) {
   const map = useMap();
   const placesLib = useMapsLibrary("places");
   const routesLib = useMapsLibrary("routes");
@@ -173,11 +260,22 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
   const [routeError, setRouteError] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
   const [arrivedPlace, setArrivedPlace] = useState(null);
+  const [lastRouteSummary, setLastRouteSummary] = useState(null);
 
   const polylineRef = useRef(null);
   const animationTimerRef = useRef(null);
+  const spatialCacheRef = useRef(loadSpatialCacheFromSession());
+  const allDiscoveredPlacesRef = useRef([]);
+  const inFlightCenterRef = useRef(null);
 
-  const blueSquareIcon = useMemo(() => createBlueSquareDataUrl(), []);
+  const charVisual = getCharacterPlaceholder(
+    character?.placeholderKey || character?.id || 1,
+  );
+
+  const characterSquareIcon = useMemo(
+    () => createCharacterSquareDataUrl(charVisual.color, charVisual.borderColor),
+    [charVisual.color, charVisual.borderColor],
+  );
 
   const stopMovementAnimation = useCallback(() => {
     if (animationTimerRef.current) {
@@ -201,139 +299,236 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
     };
   }, [stopMovementAnimation, clearRoutePolyline]);
 
-  const fetchNearbyPlaces = useCallback(async () => {
-    if (!initialCoords || !map || !placesLib) return;
+  const registerDiscoveredPlaces = useCallback((centerCoords, normalizedPlaces) => {
+    if (!Array.isArray(normalizedPlaces) || normalizedPlaces.length === 0) return;
 
-    setIsLoadingPlaces(true);
-    setPlacesError(null);
+    const mergedMap = new globalThis.Map();
+    for (const p of allDiscoveredPlacesRef.current) {
+      if (p?.id) mergedMap.set(p.id, p);
+    }
+    for (const p of normalizedPlaces) {
+      if (p?.id) mergedMap.set(p.id, p);
+    }
+    allDiscoveredPlacesRef.current = Array.from(mergedMap.values());
 
-    // 1. Try Backend API first if configured or available
-    const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:5208";
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2200);
-      const response = await fetch(
-        `${apiBase}/api/places/nearby?lat=${encodeURIComponent(initialCoords.lat)}&lng=${encodeURIComponent(initialCoords.lng)}&radius=1200`,
-        { signal: controller.signal },
-      );
-      clearTimeout(timeoutId);
+    spatialCacheRef.current = [
+      ...spatialCacheRef.current.filter(
+        (entry) =>
+          haversineDistanceKm(entry.center, centerCoords) >=
+          MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM,
+      ),
+      {
+        center: { lat: centerCoords.lat, lng: centerCoords.lng },
+        places: normalizedPlaces,
+        timestamp: Date.now(),
+      },
+    ];
+    saveSpatialCacheToSession(spatialCacheRef.current);
+  }, []);
 
-      if (response.ok) {
-        const data = await response.json();
-        const rawList = Array.isArray(data?.places) ? data.places : [];
-        const normalized = rawList
-          .map((item, idx) => normalizePlaceRecord(item, idx))
-          .filter(Boolean)
-          .slice(0, 18);
+  const fetchNearbyPlaces = useCallback(
+    async (targetCoords = initialCoords, options = { forceRefresh: false }) => {
+      if (!targetCoords || !map || !placesLib) return;
 
-        if (normalized.length > 0) {
-          setPlaces(normalized);
-          setIsLoadingPlaces(false);
-          return;
+      const center = { lat: targetCoords.lat, lng: targetCoords.lng };
+
+      // 1. Verifica cache espacial para evitar chamadas desnecessárias à API
+      if (!options?.forceRefresh) {
+        const now = Date.now();
+        const cachedHit = spatialCacheRef.current.find(
+          (entry) =>
+            now - (entry.timestamp || 0) < CACHE_TTL_MS &&
+            haversineDistanceKm(entry.center, center) <
+              MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM &&
+            Array.isArray(entry.places) &&
+            entry.places.length > 0,
+        );
+
+        if (cachedHit) {
+          const combined = [
+            ...cachedHit.places,
+            ...allDiscoveredPlacesRef.current,
+          ];
+          const reordered = sortPlacesByProximity(combined, center, 18);
+          if (reordered.length > 0) {
+            setPlaces(reordered);
+            setPlacesError(null);
+            return;
+          }
         }
       }
-    } catch {
-      // Backend unavailable or key only configured on frontend; continue to Maps JS Places
-    }
 
-    // 2. Fallback to Google Maps JavaScript Places Library in the browser
-    try {
-      const service = new placesLib.PlacesService(map);
-      service.nearbySearch(
-        {
-          location: initialCoords,
-          radius: 1200,
-        },
-        async (results, status) => {
-          if (
-            status === placesLib.PlacesServiceStatus.OK &&
-            Array.isArray(results) &&
-            results.length > 0
-          ) {
-            const normalized = results
-              .map((item, idx) => normalizePlaceRecord(item, idx))
-              .filter(Boolean)
-              .slice(0, 18);
+      // Evita requisição duplicada concorrente para o mesmo centro
+      if (
+        inFlightCenterRef.current &&
+        haversineDistanceKm(inFlightCenterRef.current, center) < 0.05
+      ) {
+        return;
+      }
+      inFlightCenterRef.current = center;
 
-            if (normalized.length === 0) {
-              setPlaces([]);
-              setPlacesError("A API retornou dados incompletos para os locais próximos.");
-            } else {
-              setPlaces(normalized);
-            }
+      setIsLoadingPlaces(true);
+      setPlacesError(null);
+
+      // 2. Tenta Backend API primeiro se configurado/disponível
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2200);
+        const response = await fetch(
+          `${apiBase}/api/places/nearby?lat=${encodeURIComponent(center.lat)}&lng=${encodeURIComponent(center.lng)}&radius=1200`,
+          { signal: controller.signal },
+        );
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const data = await response.json();
+          const rawList = Array.isArray(data?.places) ? data.places : [];
+          const normalized = rawList
+            .map((item, idx) => normalizePlaceRecord(item, idx))
+            .filter(Boolean);
+
+          if (normalized.length > 0) {
+            registerDiscoveredPlaces(center, normalized);
+            const sorted = sortPlacesByProximity(
+              [...normalized, ...allDiscoveredPlacesRef.current],
+              center,
+              18,
+            );
+            setPlaces(sorted);
             setIsLoadingPlaces(false);
+            inFlightCenterRef.current = null;
             return;
           }
+        }
+      } catch {
+        // Backend indisponível ou chave configurada apenas no frontend; continua para Maps JS Places
+      }
 
-          if (status === placesLib.PlacesServiceStatus.ZERO_RESULTS) {
-            setPlaces([]);
-            setPlacesError("Nenhum ponto de interesse encontrado próximo à sua localização.");
-            setIsLoadingPlaces(false);
-            return;
-          }
+      // 3. Fallback para Google Maps JavaScript Places Library no navegador
+      try {
+        const service = new placesLib.PlacesService(map);
+        service.nearbySearch(
+          {
+            location: center,
+            radius: 1200,
+          },
+          async (results, status) => {
+            inFlightCenterRef.current = null;
 
-          // Try Places API (New) Place.searchNearby if available
-          if (typeof placesLib.Place?.searchNearby === "function") {
-            try {
-              const { places: newPlaces } = await placesLib.Place.searchNearby({
-                fields: ["id", "displayName", "location", "types", "formattedAddress"],
-                locationRestriction: {
-                  center: initialCoords,
-                  radius: 1200,
-                },
-                maxResultCount: 18,
-              });
-
-              const normalized = (newPlaces || [])
-                .map((p, idx) =>
-                  normalizePlaceRecord(
-                    {
-                      id: p.id,
-                      name: p.displayName,
-                      lat: typeof p.location?.lat === "function" ? p.location.lat() : p.location?.lat,
-                      lng: typeof p.location?.lng === "function" ? p.location.lng() : p.location?.lng,
-                      types: p.types,
-                      address: p.formattedAddress,
-                    },
-                    idx,
-                  ),
-                )
+            if (
+              status === placesLib.PlacesServiceStatus.OK &&
+              Array.isArray(results) &&
+              results.length > 0
+            ) {
+              const normalized = results
+                .map((item, idx) => normalizePlaceRecord(item, idx))
                 .filter(Boolean);
 
               if (normalized.length > 0) {
-                setPlaces(normalized);
+                registerDiscoveredPlaces(center, normalized);
+                const sorted = sortPlacesByProximity(
+                  [...normalized, ...allDiscoveredPlacesRef.current],
+                  center,
+                  18,
+                );
+                setPlaces(sorted);
                 setIsLoadingPlaces(false);
                 return;
               }
-            } catch {
-              // Handled below
             }
-          }
 
-          setPlaces([]);
-          setPlacesError(
-            `Não foi possível carregar pontos de interesse (Status: ${status || "ERRO_API"}). Verifique se a Google Places API está habilitada.`,
-          );
-          setIsLoadingPlaces(false);
-        },
-      );
-    } catch {
-      setPlaces([]);
-      setPlacesError("Erro ao inicializar o serviço Google Places.");
-      setIsLoadingPlaces(false);
-    }
-  }, [initialCoords, map, placesLib]);
+            if (status === placesLib.PlacesServiceStatus.ZERO_RESULTS) {
+              setPlaces([]);
+              setPlacesError(
+                "Nenhum ponto de interesse encontrado próximo a este local.",
+              );
+              setIsLoadingPlaces(false);
+              return;
+            }
+
+            // Tenta Places API (New) Place.searchNearby se disponível
+            if (typeof placesLib.Place?.searchNearby === "function") {
+              try {
+                const { places: newPlaces } =
+                  await placesLib.Place.searchNearby({
+                    fields: [
+                      "id",
+                      "displayName",
+                      "location",
+                      "types",
+                      "formattedAddress",
+                    ],
+                    locationRestriction: {
+                      center,
+                      radius: 1200,
+                    },
+                    maxResultCount: 18,
+                  });
+
+                const normalized = (newPlaces || [])
+                  .map((p, idx) =>
+                    normalizePlaceRecord(
+                      {
+                        id: p.id,
+                        name: p.displayName,
+                        lat:
+                          typeof p.location?.lat === "function"
+                            ? p.location.lat()
+                            : p.location?.lat,
+                        lng:
+                          typeof p.location?.lng === "function"
+                            ? p.location.lng()
+                            : p.location?.lng,
+                        types: p.types,
+                        address: p.formattedAddress,
+                      },
+                      idx,
+                    ),
+                  )
+                  .filter(Boolean);
+
+                if (normalized.length > 0) {
+                  registerDiscoveredPlaces(center, normalized);
+                  const sorted = sortPlacesByProximity(
+                    [...normalized, ...allDiscoveredPlacesRef.current],
+                    center,
+                    18,
+                  );
+                  setPlaces(sorted);
+                  setIsLoadingPlaces(false);
+                  return;
+                }
+              } catch {
+                // Tratado abaixo
+              }
+            }
+
+            setPlacesError(
+              `Não foi possível carregar pontos de interesse (Status: ${status || "ERRO_API"}). Verifique se a Google Places API está habilitada.`,
+            );
+            setIsLoadingPlaces(false);
+          },
+        );
+      } catch {
+        inFlightCenterRef.current = null;
+        setPlacesError("Erro ao inicializar o serviço Google Places.");
+        setIsLoadingPlaces(false);
+      }
+    },
+    [initialCoords, map, placesLib, registerDiscoveredPlaces],
+  );
 
   useEffect(() => {
     if (!map || !placesLib) return;
     const timerId = setTimeout(() => {
-      fetchNearbyPlaces();
+      fetchNearbyPlaces(initialCoords);
     }, 0);
     return () => clearTimeout(timerId);
-  }, [map, placesLib, fetchNearbyPlaces]);
+  }, [map, placesLib, initialCoords, fetchNearbyPlaces]);
 
   const drawRouteAndAnimate = useCallback(
-    (pathCoords, destinationPlace) => {
+    async (pathCoords, destinationPlace, originCoord, explicitDistanceKm = null) => {
       if (!map) return;
 
       clearRoutePolyline();
@@ -349,10 +544,46 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
       });
       polylineRef.current = polyline;
 
+      // Calcula a distância da rota em km a partir da Directions API ou geometria da rota
+      const pathDistKm = calculatePathDistanceKm(pathCoords);
+      const directDistKm = haversineDistanceKm(originCoord, {
+        lat: destinationPlace.lat,
+        lng: destinationPlace.lng,
+      });
+
+      const rawDistanceKm =
+        typeof explicitDistanceKm === "number" && explicitDistanceKm > 0
+          ? explicitDistanceKm
+          : pathDistKm > 0
+            ? pathDistKm
+            : directDistKm;
+
+      const routeDistanceKm = Math.max(0.01, Number(rawDistanceKm.toFixed(3)));
+
+      // Consome a energia imediatamente através do backend (ou fallback sincronizado) ao iniciar o deslocamento
+      if (onRegisterRouteTraversal) {
+        const result = await onRegisterRouteTraversal(
+          routeDistanceKm,
+          destinationPlace,
+        );
+        if (result) {
+          setLastRouteSummary({
+            distanciaKm: result.distanciaKm ?? routeDistanceKm,
+            energiaConsumida: result.energiaConsumida ?? 0,
+          });
+        }
+      }
+
       const steps = interpolateRoutePoints(pathCoords, 90);
       if (steps.length === 0) {
-        setPlayerCoords({ lat: destinationPlace.lat, lng: destinationPlace.lng });
+        const finalCoord = {
+          lat: destinationPlace.lat,
+          lng: destinationPlace.lng,
+        };
+        setPlayerCoords(finalCoord);
         setArrivedPlace(destinationPlace);
+        map.panTo(finalCoord);
+        fetchNearbyPlaces(finalCoord);
         return;
       }
 
@@ -364,17 +595,29 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
         if (currentStep >= steps.length) {
           clearInterval(animationTimerRef.current);
           animationTimerRef.current = null;
-          const finalCoord = { lat: destinationPlace.lat, lng: destinationPlace.lng };
+          const finalCoord = {
+            lat: destinationPlace.lat,
+            lng: destinationPlace.lng,
+          };
           setPlayerCoords(finalCoord);
           setIsMoving(false);
           setArrivedPlace(destinationPlace);
+          // Centraliza o mapa no novo local e atualiza os pontos de interesse ao redor (com proteção de cache espacial)
+          map.panTo(finalCoord);
+          fetchNearbyPlaces(finalCoord);
           return;
         }
 
         setPlayerCoords(steps[currentStep]);
       }, 35);
     },
-    [map, clearRoutePolyline, stopMovementAnimation],
+    [
+      map,
+      clearRoutePolyline,
+      stopMovementAnimation,
+      onRegisterRouteTraversal,
+      fetchNearbyPlaces,
+    ],
   );
 
   const handleSelectPlace = useCallback(
@@ -391,7 +634,7 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
       const destination = { lat: place.lat, lng: place.lng };
 
       // 1. Tenta rota via Backend usando a chave dedicada da Directions API
-      const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:5208";
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "";
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -409,7 +652,7 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
               lat: typeof p.lat === "number" ? p.lat : p.Lat,
               lng: typeof p.lng === "number" ? p.lng : p.Lng,
             }));
-            drawRouteAndAnimate(pathCoords, place);
+            drawRouteAndAnimate(pathCoords, place, origin, data.distanceKm);
             return;
           }
         }
@@ -430,7 +673,8 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
               headers: {
                 "Content-Type": "application/json",
                 "X-Goog-Api-Key": directionsKey,
-                "X-Goog-FieldMask": "routes.polyline.encodedPolyline",
+                "X-Goog-FieldMask":
+                  "routes.distanceMeters,routes.polyline.encodedPolyline",
               },
               body: JSON.stringify({
                 origin: {
@@ -440,7 +684,10 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
                 },
                 destination: {
                   location: {
-                    latLng: { latitude: destination.lat, longitude: destination.lng },
+                    latLng: {
+                      latitude: destination.lat,
+                      longitude: destination.lng,
+                    },
                   },
                 },
                 travelMode: "WALK",
@@ -450,11 +697,16 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
 
           if (routesResp.ok) {
             const routesData = await routesResp.json();
-            const encoded = routesData?.routes?.[0]?.polyline?.encodedPolyline;
+            const firstRoute = routesData?.routes?.[0];
+            const encoded = firstRoute?.polyline?.encodedPolyline;
             const decoded = decodeEncodedPolyline(encoded);
             if (decoded.length > 0) {
               setIsCalculatingRoute(false);
-              drawRouteAndAnimate(decoded, place);
+              const distKm =
+                typeof firstRoute?.distanceMeters === "number"
+                  ? Number((firstRoute.distanceMeters / 1000).toFixed(3))
+                  : null;
+              drawRouteAndAnimate(decoded, place, origin, distKm);
               return;
             }
           }
@@ -478,7 +730,12 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
               lat: pt.lat(),
               lng: pt.lng(),
             }));
-            drawRouteAndAnimate(pathCoords, place);
+            const legMeters = result.routes[0]?.legs?.[0]?.distance?.value;
+            const distKm =
+              typeof legMeters === "number"
+                ? Number((legMeters / 1000).toFixed(3))
+                : null;
+            drawRouteAndAnimate(pathCoords, place, origin, distKm);
             return;
           }
 
@@ -495,16 +752,24 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
                 fallbackStatus === "OK" &&
                 fallbackResult?.routes?.[0]?.overview_path?.length
               ) {
-                const pathCoords = fallbackResult.routes[0].overview_path.map((pt) => ({
-                  lat: pt.lat(),
-                  lng: pt.lng(),
-                }));
-                drawRouteAndAnimate(pathCoords, place);
+                const pathCoords =
+                  fallbackResult.routes[0].overview_path.map((pt) => ({
+                    lat: pt.lat(),
+                    lng: pt.lng(),
+                  }));
+                const legMeters =
+                  fallbackResult.routes[0]?.legs?.[0]?.distance?.value;
+                const distKm =
+                  typeof legMeters === "number"
+                    ? Number((legMeters / 1000).toFixed(3))
+                    : null;
+                drawRouteAndAnimate(pathCoords, place, origin, distKm);
                 return;
               }
 
               const isDenied =
-                fallbackStatus === "REQUEST_DENIED" || status === "REQUEST_DENIED";
+                fallbackStatus === "REQUEST_DENIED" ||
+                status === "REQUEST_DENIED";
               if (isDenied) {
                 setRouteError(
                   `Aviso: Directions API não habilitada no Google Cloud (${fallbackStatus || status}). Utilizando trajeto direto alternativo até o destino.`,
@@ -516,7 +781,7 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
               }
 
               // Traçado direto de contingência para garantir a continuidade da jogabilidade
-              drawRouteAndAnimate([origin, destination], place);
+              drawRouteAndAnimate([origin, destination], place, origin);
             },
           );
         },
@@ -524,6 +789,15 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
     },
     [routesLib, map, playerCoords, stopMovementAnimation, drawRouteAndAnimate],
   );
+
+  const playerName = playerState?.nome || "Explorador";
+  const characterName =
+    playerState?.personagemAtual?.nome || character?.name || "Explorador #1";
+  const vidaAtual = playerState?.atributos?.vidaAtual ?? 50;
+  const vidaFinal = playerState?.atributos?.vidaFinal ?? 50;
+  const energiaAtual = playerState?.atributos?.energiaAtual ?? 100;
+  const energiaMaxima = playerState?.atributos?.energiaMaximaFinal ?? 100;
+  const nivelDePoder = playerState?.atributos?.nivelDePoder ?? 10;
 
   return (
     <div
@@ -553,25 +827,48 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div
             style={{
-              width: 20,
-              height: 20,
-              background: "#2563EB",
-              border: "2px solid #DBEAFE",
-              borderRadius: 2,
+              width: 24,
+              height: 24,
+              background: charVisual.color,
+              border: `2px solid ${charVisual.borderColor}`,
+              borderRadius: 3,
             }}
           />
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#EDE6D3" }}>
-              {character?.name || "Explorador #1"}
+              {playerName} •{" "}
+              <span style={{ color: "#C89B5C" }}>{characterName}</span>
             </div>
             <div
               style={{
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: 11,
                 color: "#8A9A8C",
+                display: "flex",
+                gap: 12,
+                flexWrap: "wrap",
               }}
             >
-              Posição: {playerCoords.lat.toFixed(4)}, {playerCoords.lng.toFixed(4)}
+              <span>
+                Vida:{" "}
+                <strong style={{ color: "#EDE6D3" }}>
+                  {vidaAtual}/{vidaFinal}
+                </strong>
+              </span>
+              <span>
+                Energia:{" "}
+                <strong style={{ color: "#38BDF8" }}>
+                  {Number(energiaAtual).toFixed(2)}/{energiaMaxima}
+                </strong>
+                {lastRouteSummary && (
+                  <span style={{ color: "#F87171", marginLeft: 4 }}>
+                    (-{Number(lastRouteSummary.energiaConsumida).toFixed(2)})
+                  </span>
+                )}
+              </span>
+              <span>
+                Poder: <strong style={{ color: "#C89B5C" }}>{nivelDePoder}</strong>
+              </span>
             </div>
           </div>
         </div>
@@ -588,7 +885,7 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
             : isMoving
               ? `Em movimento até: ${selectedPlace?.name}...`
               : selectedPlace
-                ? `Destino selecionado: ${selectedPlace.name}`
+                ? `Local atual: ${selectedPlace.name}`
                 : "Selecione um ponto de interesse no mapa"}
         </div>
 
@@ -631,7 +928,7 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
           {placesError && (
             <button
               type="button"
-              onClick={fetchNearbyPlaces}
+              onClick={() => fetchNearbyPlaces(playerCoords, { forceRefresh: true })}
               style={{
                 padding: "5px 10px",
                 background: "#EF4444",
@@ -649,7 +946,14 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
       )}
 
       {/* Map + Side Panel Container */}
-      <div style={{ position: "relative", flex: 1, width: "100%", display: "flex" }}>
+      <div
+        style={{
+          position: "relative",
+          flex: 1,
+          width: "100%",
+          display: "flex",
+        }}
+      >
         <div style={{ flex: 1, height: "100%", position: "relative" }}>
           <Map
             defaultCenter={initialCoords}
@@ -661,11 +965,11 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
             styles={GAME_MAP_STYLES}
             style={{ width: "100%", height: "100%" }}
           >
-            {/* Player Character Marker (Blue Square) */}
+            {/* Player Character Marker */}
             <Marker
               position={playerCoords}
-              title={`${character?.name || "Personagem"} (Sua posição)`}
-              icon={blueSquareIcon}
+              title={`${characterName} (Sua posição)`}
+              icon={characterSquareIcon}
               zIndex={1000}
             />
 
@@ -729,7 +1033,7 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
                   color: "#8A9A8C",
                 }}
               >
-                Buscando...
+                Atualizando...
               </span>
             )}
           </div>
@@ -819,9 +1123,10 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
         </aside>
       </div>
 
-      {/* Arrival Modal (Etapa 12) */}
+      {/* Arrival Modal */}
       <PlaceArrivalModal
         place={arrivedPlace}
+        routeSummary={lastRouteSummary}
         onClose={() => setArrivedPlace(null)}
       />
     </div>
@@ -831,6 +1136,8 @@ function GameMapContent({ initialCoords, character, onExitToMenu }) {
 export default function GoogleMapDemo({
   initialCoords = { lat: -25.4284, lng: -49.2733 },
   character = { id: 1, name: "Explorador #1" },
+  playerState = null,
+  onRegisterRouteTraversal,
   onExitToMenu,
 }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -932,6 +1239,8 @@ export default function GoogleMapDemo({
       <GameMapContent
         initialCoords={initialCoords}
         character={character}
+        playerState={playerState}
+        onRegisterRouteTraversal={onRegisterRouteTraversal}
         onExitToMenu={onExitToMenu}
       />
     </APIProvider>

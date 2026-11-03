@@ -7,11 +7,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<GeoQuestDbContext>(options =>
     options.UseSqlite(
-        builder.Configuration.GetConnectionString("DefaultConnection")
+        builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=geoquest.db"
     )
 );
 
 builder.Services.AddSingleton<PlaceCategoryMapper>();
+builder.Services.AddSingleton<PlayerStatsCalculator>();
 builder.Services.AddHttpClient<IGooglePlacesClient, GooglePlacesClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
@@ -32,6 +33,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+await DatabaseInitializer.InitializeAsync(app.Services);
 
 if (app.Environment.IsDevelopment())
 {

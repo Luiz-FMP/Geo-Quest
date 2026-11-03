@@ -16,5 +16,9 @@ public class Personagem
 
     public string Vantagem { get; set; } = string.Empty;
 
+    public bool Disponivel { get; set; } = true;
+
+    public string PlaceholderKey { get; set; } = "char_1";
+
     public ICollection<Jogador> Jogadores { get; set; } = new List<Jogador>();
 }
