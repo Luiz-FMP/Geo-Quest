@@ -19,7 +19,8 @@ public record AtributosDetalhadosDto(
     int VelocidadeModificador,
     int VelocidadeFinal,
     double NivelDePoder,
-    double ConsumoEnergiaPorKm
+    double ConsumoEnergiaPorKm,
+    int Moedas
 );
 
 public record PersonagemResumoDto(
@@ -92,6 +93,7 @@ public record JogadorEstadoDto(
     int Id,
     string Nome,
     int PersonagemId,
+    int Moedas,
     PersonagemResumoDto PersonagemAtual,
     AtributosDetalhadosDto Atributos,
     IReadOnlyList<ItemInventarioDto> Mochila,
@@ -104,6 +106,8 @@ public record JogadorEstadoDto(
 public record AtualizarNomeJogadorRequest(string Nome);
 
 public record AlterarPersonagemRequest(int PersonagemId);
+
+public record AtualizarVidaJogadorRequest(int VidaAtual, double? EnergiaAtual = null);
 
 public record MoverItemInventarioRequest(
     int InventarioId,
@@ -126,4 +130,3 @@ public record RegistrarPercursoRequest(
     string? PlaceId = null,
     string? NomeLocal = null
 );
-

@@ -7,10 +7,17 @@ import {
   useMapsLibrary,
 } from "@vis.gl/react-google-maps";
 import { getCharacterPlaceholder } from "../config/placeholderAssets";
+import {
+  COMBAT_TYPES,
+  iniciarSessaoCombate,
+  planRouteRandomEncounter,
+} from "../services/CombatEngine";
 import { normalizePlaceRecord } from "../utils/placeCategories";
+import CombatScreen from "./combat/CombatScreen";
 import PlaceArrivalModal from "./PlaceArrivalModal";
+import PlaceShopModal from "./PlaceShopModal";
 
-const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v1";
+const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v2";
 const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
 
@@ -64,16 +71,23 @@ const GAME_MAP_STYLES = [
   },
 ];
 
-function createCharacterSquareDataUrl(fillColor = "#2563EB", strokeColor = "#DBEAFE") {
+function createCharacterSquareDataUrl(
+  fillColor = "#2563EB",
+  strokeColor = "#DBEAFE",
+) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
     <rect x="3" y="3" width="26" height="26" fill="${fillColor}" stroke="${strokeColor}" stroke-width="3" rx="2" />
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-function createPlaceIconDataUrl(color = "#C89B5C", isSelected = false) {
-  const stroke = isSelected ? "#FFFFFF" : "#161D18";
-  const size = isSelected ? 30 : 24;
+function createPlaceIconDataUrl(
+  color = "#C89B5C",
+  isSelected = false,
+  isBossSpecial = false,
+) {
+  const stroke = isSelected ? "#FFFFFF" : isBossSpecial ? "#FCD34D" : "#161D18";
+  const size = isSelected ? 30 : isBossSpecial ? 28 : 24;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 28 28">
     <rect x="4" y="4" width="20" height="20" fill="${color}" stroke="${stroke}" stroke-width="2.5" rx="3" />
     <circle cx="14" cy="14" r="3.5" fill="#161D18" />
@@ -128,7 +142,8 @@ function haversineDistanceKm(a, b) {
     sinLat * sinLat +
     Math.cos((a.lat * Math.PI) / 180) *
       Math.cos((b.lat * Math.PI) / 180) *
-      sinLng * sinLng;
+      sinLng *
+      sinLng;
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
@@ -146,7 +161,7 @@ function sortPlacesByProximity(placesList, centerCoords, maxResults = 18) {
   const seen = new Set();
   const unique = [];
   for (const p of placesList) {
-    if (!p || !p.id || seen.has(p.id)) continue;
+    if (!p || !p.id || !p.category || seen.has(p.id)) continue;
     seen.add(p.id);
     unique.push(p);
   }
@@ -244,7 +259,7 @@ function GameMapContent({
   character,
   playerState,
   onRegisterRouteTraversal,
-  onExitToMenu,
+  onUpdatePlayerHp,
 }) {
   const map = useMap();
   const placesLib = useMapsLibrary("places");
@@ -260,10 +275,20 @@ function GameMapContent({
   const [routeError, setRouteError] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
   const [arrivedPlace, setArrivedPlace] = useState(null);
+  const [hasArrivedAtPlace, setHasArrivedAtPlace] = useState(false);
   const [lastRouteSummary, setLastRouteSummary] = useState(null);
+
+  // Estado de recolhimento/expansão do painel de Locais Próximos (Seção 4)
+  const [isPlacesPanelCollapsed, setIsPlacesPanelCollapsed] = useState(false);
+
+  // Estado do combate ativo e da loja aberta (temporários de interface, Seção 13)
+  const [activeCombatSession, setActiveCombatSession] = useState(null);
+  const [activeShopPlace, setActiveShopPlace] = useState(null);
 
   const polylineRef = useRef(null);
   const animationTimerRef = useRef(null);
+  const pausedRouteRef = useRef(null);
+  const preparedRouteRef = useRef(null);
   const spatialCacheRef = useRef(loadSpatialCacheFromSession());
   const allDiscoveredPlacesRef = useRef([]);
   const inFlightCenterRef = useRef(null);
@@ -273,7 +298,8 @@ function GameMapContent({
   );
 
   const characterSquareIcon = useMemo(
-    () => createCharacterSquareDataUrl(charVisual.color, charVisual.borderColor),
+    () =>
+      createCharacterSquareDataUrl(charVisual.color, charVisual.borderColor),
     [charVisual.color, charVisual.borderColor],
   );
 
@@ -282,6 +308,7 @@ function GameMapContent({
       clearInterval(animationTimerRef.current);
       animationTimerRef.current = null;
     }
+    pausedRouteRef.current = null;
     setIsMoving(false);
   }, []);
 
@@ -299,35 +326,42 @@ function GameMapContent({
     };
   }, [stopMovementAnimation, clearRoutePolyline]);
 
-  const registerDiscoveredPlaces = useCallback((centerCoords, normalizedPlaces) => {
-    if (!Array.isArray(normalizedPlaces) || normalizedPlaces.length === 0) return;
+  const registerDiscoveredPlaces = useCallback(
+    (centerCoords, normalizedPlaces) => {
+      if (!Array.isArray(normalizedPlaces) || normalizedPlaces.length === 0)
+        return;
 
-    const mergedMap = new globalThis.Map();
-    for (const p of allDiscoveredPlacesRef.current) {
-      if (p?.id) mergedMap.set(p.id, p);
-    }
-    for (const p of normalizedPlaces) {
-      if (p?.id) mergedMap.set(p.id, p);
-    }
-    allDiscoveredPlacesRef.current = Array.from(mergedMap.values());
+      const mergedMap = new globalThis.Map();
+      for (const p of allDiscoveredPlacesRef.current) {
+        if (p?.id) mergedMap.set(p.id, p);
+      }
+      for (const p of normalizedPlaces) {
+        if (p?.id) mergedMap.set(p.id, p);
+      }
+      allDiscoveredPlacesRef.current = Array.from(mergedMap.values());
 
-    spatialCacheRef.current = [
-      ...spatialCacheRef.current.filter(
-        (entry) =>
-          haversineDistanceKm(entry.center, centerCoords) >=
-          MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM,
-      ),
-      {
-        center: { lat: centerCoords.lat, lng: centerCoords.lng },
-        places: normalizedPlaces,
-        timestamp: Date.now(),
-      },
-    ];
-    saveSpatialCacheToSession(spatialCacheRef.current);
-  }, []);
+      spatialCacheRef.current = [
+        ...spatialCacheRef.current.filter(
+          (entry) =>
+            haversineDistanceKm(entry.center, centerCoords) >=
+            MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM,
+        ),
+        {
+          center: { lat: centerCoords.lat, lng: centerCoords.lng },
+          places: normalizedPlaces,
+          timestamp: Date.now(),
+        },
+      ];
+      saveSpatialCacheToSession(spatialCacheRef.current);
+    },
+    [],
+  );
 
   const fetchNearbyPlaces = useCallback(
-    async (targetCoords = initialCoords, options = { forceRefresh: false }) => {
+    async (
+      targetCoords = initialCoords,
+      options = { forceRefresh: false },
+    ) => {
       if (!targetCoords || !map || !placesLib) return;
 
       const center = { lat: targetCoords.lat, lng: targetCoords.lng };
@@ -441,7 +475,7 @@ function GameMapContent({
             if (status === placesLib.PlacesServiceStatus.ZERO_RESULTS) {
               setPlaces([]);
               setPlacesError(
-                "Nenhum ponto de interesse encontrado próximo a este local.",
+                "Nenhum ponto de interesse permitido encontrado próximo a este local.",
               );
               setIsLoadingPlaces(false);
               return;
@@ -456,6 +490,7 @@ function GameMapContent({
                       "id",
                       "displayName",
                       "location",
+                      "primaryType",
                       "types",
                       "formattedAddress",
                     ],
@@ -480,6 +515,7 @@ function GameMapContent({
                           typeof p.location?.lng === "function"
                             ? p.location.lng()
                             : p.location?.lng,
+                        primaryType: p.primaryType,
                         types: p.types,
                         address: p.formattedAddress,
                       },
@@ -527,8 +563,160 @@ function GameMapContent({
     return () => clearTimeout(timerId);
   }, [map, placesLib, initialCoords, fetchNearbyPlaces]);
 
+  const startCombatSession = useCallback(
+    async (tipoCombate, targetPlace) => {
+      const sessao = await iniciarSessaoCombate({
+        jogadorId: playerState?.id || 1,
+        tipoCombate,
+        nomeLocal: targetPlace?.name || "Trajeto Urbano",
+        cidadeId: 1,
+      });
+      setActiveCombatSession(sessao);
+    },
+    [playerState?.id],
+  );
+
+  // Inicia ou retoma a execução dos passos da rota
+  const runRouteStepAnimation = useCallback(
+    (
+      steps,
+      startStepIndex,
+      destinationPlace,
+      encounterPlan = null,
+      alreadyTriggeredEncounter = false,
+    ) => {
+      if (!map) return;
+
+      let currentStep = startStepIndex;
+      let triggeredEncounter = alreadyTriggeredEncounter;
+      setIsMoving(true);
+
+      animationTimerRef.current = setInterval(() => {
+        currentStep += 1;
+
+        // Verifica se este passo deve pausar a rota para iniciar um combate aleatório (Seção 9.1)
+        if (
+          encounterPlan?.willTrigger &&
+          !triggeredEncounter &&
+          currentStep === encounterPlan.triggerStep
+        ) {
+          triggeredEncounter = true;
+          clearInterval(animationTimerRef.current);
+          animationTimerRef.current = null;
+
+          const pauseCoord = steps[currentStep] || playerCoords;
+          setPlayerCoords(pauseCoord);
+          setIsMoving(false);
+
+          pausedRouteRef.current = {
+            steps,
+            currentStep,
+            destinationPlace,
+          };
+
+          startCombatSession(COMBAT_TYPES.RANDOM, destinationPlace);
+          return;
+        }
+
+        if (currentStep >= steps.length) {
+          clearInterval(animationTimerRef.current);
+          animationTimerRef.current = null;
+          pausedRouteRef.current = null;
+
+          const finalCoord = {
+            lat: destinationPlace.lat,
+            lng: destinationPlace.lng,
+          };
+          setPlayerCoords(finalCoord);
+          setIsMoving(false);
+          setHasArrivedAtPlace(true);
+          setArrivedPlace(destinationPlace);
+          map.panTo(finalCoord);
+          fetchNearbyPlaces(finalCoord);
+          return;
+        }
+
+        setPlayerCoords(steps[currentStep]);
+      }, 35);
+    },
+    [map, playerCoords, fetchNearbyPlaces, startCombatSession],
+  );
+
+  const calculateRouteEnergyCost = useCallback(
+    (distanceKm) => {
+      const safeDist = Math.max(0, Number(distanceKm) || 0);
+      if (safeDist <= 0) return 0;
+      const consumoPorKm =
+        playerState?.atributos?.consumoEnergiaPorKm ??
+        10 / Math.pow(2, (playerState?.atributos?.velocidadeFinal ?? 0) / 100);
+      return Number((safeDist * consumoPorKm).toFixed(2));
+    },
+    [
+      playerState?.atributos?.consumoEnergiaPorKm,
+      playerState?.atributos?.velocidadeFinal,
+    ],
+  );
+
+  const prepareRoutePreview = useCallback(
+    (
+      pathCoords,
+      destinationPlace,
+      originCoord,
+      explicitDistanceKm = null,
+    ) => {
+      if (!map) return;
+
+      clearRoutePolyline();
+
+      const polyline = new window.google.maps.Polyline({
+        path: pathCoords,
+        geodesic: true,
+        strokeColor: "#38BDF8",
+        strokeOpacity: 0.95,
+        strokeWeight: 5,
+        map,
+      });
+      polylineRef.current = polyline;
+
+      const pathDistKm = calculatePathDistanceKm(pathCoords);
+      const directDistKm = haversineDistanceKm(originCoord, {
+        lat: destinationPlace.lat,
+        lng: destinationPlace.lng,
+      });
+
+      const rawDistanceKm =
+        typeof explicitDistanceKm === "number" && explicitDistanceKm > 0
+          ? explicitDistanceKm
+          : pathDistKm > 0
+            ? pathDistKm
+            : directDistKm;
+
+      const routeDistanceKm = Math.max(0.01, Number(rawDistanceKm.toFixed(3)));
+      const energiaConsumida = calculateRouteEnergyCost(routeDistanceKm);
+
+      preparedRouteRef.current = {
+        pathCoords,
+        destinationPlace,
+        originCoord,
+        routeDistanceKm,
+        energiaConsumida,
+      };
+
+      setLastRouteSummary({
+        distanciaKm: routeDistanceKm,
+        energiaConsumida,
+      });
+    },
+    [map, clearRoutePolyline, calculateRouteEnergyCost],
+  );
+
   const drawRouteAndAnimate = useCallback(
-    async (pathCoords, destinationPlace, originCoord, explicitDistanceKm = null) => {
+    async (
+      pathCoords,
+      destinationPlace,
+      originCoord,
+      explicitDistanceKm = null,
+    ) => {
       if (!map) return;
 
       clearRoutePolyline();
@@ -544,7 +732,6 @@ function GameMapContent({
       });
       polylineRef.current = polyline;
 
-      // Calcula a distância da rota em km a partir da Directions API ou geometria da rota
       const pathDistKm = calculatePathDistanceKm(pathCoords);
       const directDistKm = haversineDistanceKm(originCoord, {
         lat: destinationPlace.lat,
@@ -560,7 +747,6 @@ function GameMapContent({
 
       const routeDistanceKm = Math.max(0.01, Number(rawDistanceKm.toFixed(3)));
 
-      // Consome a energia imediatamente através do backend (ou fallback sincronizado) ao iniciar o deslocamento
       if (onRegisterRouteTraversal) {
         const result = await onRegisterRouteTraversal(
           routeDistanceKm,
@@ -581,35 +767,20 @@ function GameMapContent({
           lng: destinationPlace.lng,
         };
         setPlayerCoords(finalCoord);
+        setHasArrivedAtPlace(true);
         setArrivedPlace(destinationPlace);
         map.panTo(finalCoord);
         fetchNearbyPlaces(finalCoord);
         return;
       }
 
-      setIsMoving(true);
-      let currentStep = 0;
+      // Avaliação única e controlada de combate aleatório para a rota (Seção 9.1)
+      const encounterPlan = planRouteRandomEncounter(
+        routeDistanceKm,
+        steps.length,
+      );
 
-      animationTimerRef.current = setInterval(() => {
-        currentStep += 1;
-        if (currentStep >= steps.length) {
-          clearInterval(animationTimerRef.current);
-          animationTimerRef.current = null;
-          const finalCoord = {
-            lat: destinationPlace.lat,
-            lng: destinationPlace.lng,
-          };
-          setPlayerCoords(finalCoord);
-          setIsMoving(false);
-          setArrivedPlace(destinationPlace);
-          // Centraliza o mapa no novo local e atualiza os pontos de interesse ao redor (com proteção de cache espacial)
-          map.panTo(finalCoord);
-          fetchNearbyPlaces(finalCoord);
-          return;
-        }
-
-        setPlayerCoords(steps[currentStep]);
-      }, 35);
+      runRouteStepAnimation(steps, 0, destinationPlace, encounterPlan, false);
     },
     [
       map,
@@ -617,6 +788,77 @@ function GameMapContent({
       stopMovementAnimation,
       onRegisterRouteTraversal,
       fetchNearbyPlaces,
+      runRouteStepAnimation,
+    ],
+  );
+
+  const handleGoToPlace = useCallback(
+    (targetPlace) => {
+      const place = targetPlace || arrivedPlace || selectedPlace;
+      if (!place) return;
+
+      const origin = { lat: playerCoords.lat, lng: playerCoords.lng };
+      const destination = { lat: place.lat, lng: place.lng };
+      const prepared = preparedRouteRef.current;
+
+      const pathCoords =
+        prepared &&
+        prepared.destinationPlace?.id === place.id &&
+        Array.isArray(prepared.pathCoords) &&
+        prepared.pathCoords.length > 0
+          ? prepared.pathCoords
+          : [origin, destination];
+
+      const explicitDistanceKm =
+        prepared && prepared.destinationPlace?.id === place.id
+          ? prepared.routeDistanceKm
+          : null;
+
+      setArrivedPlace(null);
+      drawRouteAndAnimate(pathCoords, place, origin, explicitDistanceKm);
+    },
+    [arrivedPlace, selectedPlace, playerCoords, drawRouteAndAnimate],
+  );
+
+  const handleFinishCombat = useCallback(
+    (result) => {
+      const finishedCombatType = activeCombatSession?.tipoCombate;
+      setActiveCombatSession(null);
+
+      // Atualiza Vida e Energia atuais do jogador após o combate (sem conceder moedas ou itens)
+      if (onUpdatePlayerHp) {
+        const nextHp = Math.max(1, Math.round(result?.hpRestante ?? 1));
+        const nextEnergy =
+          typeof result?.energiaRestante === "number"
+            ? result.energiaRestante
+            : null;
+        onUpdatePlayerHp(nextHp, nextEnergy);
+      }
+
+      // Se havia uma rota pausada por combate aleatório ("Emboscada"), respeita o estado atual da rota
+      if (
+        finishedCombatType === COMBAT_TYPES.RANDOM &&
+        pausedRouteRef.current
+      ) {
+        const { steps, currentStep, destinationPlace } = pausedRouteRef.current;
+        pausedRouteRef.current = null;
+
+        if (result?.vitoria === false && !result?.fugiu) {
+          // Em caso de derrota, o deslocamento é interrompido na posição atual da rota
+          clearRoutePolyline();
+          setIsMoving(false);
+          return;
+        }
+
+        // Caso contrário (vitória ou fuga), retoma o deslocamento até o destino da rota
+        runRouteStepAnimation(steps, currentStep, destinationPlace, null, true);
+      }
+    },
+    [
+      activeCombatSession,
+      onUpdatePlayerHp,
+      clearRoutePolyline,
+      runRouteStepAnimation,
     ],
   );
 
@@ -625,13 +867,28 @@ function GameMapContent({
       if (!place || !routesLib || !map) return;
 
       stopMovementAnimation();
-      setArrivedPlace(null);
       setSelectedPlace(place);
       setRouteError(null);
-      setIsCalculatingRoute(true);
 
       const origin = { lat: playerCoords.lat, lng: playerCoords.lng };
       const destination = { lat: place.lat, lng: place.lng };
+
+      // Se o jogador já está neste Place, abre o menu imediatamente com a ação liberada
+      if (haversineDistanceKm(origin, destination) < 0.015) {
+        clearRoutePolyline();
+        preparedRouteRef.current = null;
+        setIsCalculatingRoute(false);
+        setHasArrivedAtPlace(true);
+        setLastRouteSummary({ distanciaKm: 0, energiaConsumida: 0 });
+        setArrivedPlace(place);
+        return;
+      }
+
+      // O menu do Place abre ANTES do personagem ir, exibindo custo de energia e opção IR
+      setHasArrivedAtPlace(false);
+      prepareRoutePreview([origin, destination], place, origin);
+      setArrivedPlace(place);
+      setIsCalculatingRoute(true);
 
       // 1. Tenta rota via Backend usando a chave dedicada da Directions API
       const apiBase = import.meta.env.VITE_API_BASE_URL || "";
@@ -652,15 +909,15 @@ function GameMapContent({
               lat: typeof p.lat === "number" ? p.lat : p.Lat,
               lng: typeof p.lng === "number" ? p.lng : p.Lng,
             }));
-            drawRouteAndAnimate(pathCoords, place, origin, data.distanceKm);
+            prepareRoutePreview(pathCoords, place, origin, data.distanceKm);
             return;
           }
         }
       } catch {
-        // Backend não disponível; prossegue para tentativa direta com a chave Directions/Routes
+        // Backend não disponível; prossegue para tentativa direta
       }
 
-      // 2. Tenta Google Routes API v2 direto do navegador com VITE_GOOGLE_DIRECTIONS_API_KEY
+      // 2. Tenta Google Routes API v2 direto do navegador
       const directionsKey =
         import.meta.env.VITE_GOOGLE_DIRECTIONS_API_KEY ||
         import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -706,7 +963,7 @@ function GameMapContent({
                 typeof firstRoute?.distanceMeters === "number"
                   ? Number((firstRoute.distanceMeters / 1000).toFixed(3))
                   : null;
-              drawRouteAndAnimate(decoded, place, origin, distKm);
+              prepareRoutePreview(decoded, place, origin, distKm);
               return;
             }
           }
@@ -735,11 +992,10 @@ function GameMapContent({
               typeof legMeters === "number"
                 ? Number((legMeters / 1000).toFixed(3))
                 : null;
-            drawRouteAndAnimate(pathCoords, place, origin, distKm);
+            prepareRoutePreview(pathCoords, place, origin, distKm);
             return;
           }
 
-          // Fallback to DRIVING if walking route is unavailable
           directionsService.route(
             {
               origin,
@@ -763,7 +1019,7 @@ function GameMapContent({
                   typeof legMeters === "number"
                     ? Number((legMeters / 1000).toFixed(3))
                     : null;
-                drawRouteAndAnimate(pathCoords, place, origin, distKm);
+                prepareRoutePreview(pathCoords, place, origin, distKm);
                 return;
               }
 
@@ -780,24 +1036,43 @@ function GameMapContent({
                 );
               }
 
-              // Traçado direto de contingência para garantir a continuidade da jogabilidade
-              drawRouteAndAnimate([origin, destination], place, origin);
+              prepareRoutePreview([origin, destination], place, origin);
             },
           );
         },
       );
     },
-    [routesLib, map, playerCoords, stopMovementAnimation, drawRouteAndAnimate],
+    [
+      routesLib,
+      map,
+      playerCoords,
+      stopMovementAnimation,
+      clearRoutePolyline,
+      prepareRoutePreview,
+    ],
   );
 
   const playerName = playerState?.nome || "Explorador";
   const characterName =
     playerState?.personagemAtual?.nome || character?.name || "Explorador #1";
   const vidaAtual = playerState?.atributos?.vidaAtual ?? 50;
-  const vidaFinal = playerState?.atributos?.vidaFinal ?? 50;
+  const vidaFinal = Math.max(1, playerState?.atributos?.vidaFinal ?? 50);
   const energiaAtual = playerState?.atributos?.energiaAtual ?? 100;
-  const energiaMaxima = playerState?.atributos?.energiaMaximaFinal ?? 100;
+  const energiaMaxima = Math.max(
+    1,
+    playerState?.atributos?.energiaMaximaFinal ?? 100,
+  );
   const nivelDePoder = playerState?.atributos?.nivelDePoder ?? 10;
+  const moedas = playerState?.moedas ?? playerState?.atributos?.moedas ?? 0;
+
+  const vidaPercent = Math.max(
+    0,
+    Math.min(100, Math.round((vidaAtual / vidaFinal) * 100)),
+  );
+  const energiaPercent = Math.max(
+    0,
+    Math.min(100, Math.round((energiaAtual / energiaMaxima) * 100)),
+  );
 
   return (
     <div
@@ -805,330 +1080,535 @@ function GameMapContent({
         position: "relative",
         width: "100%",
         height: "100vh",
-        display: "flex",
-        flexDirection: "column",
+        overflow: "hidden",
         background: "#161D18",
       }}
     >
-      {/* Top HUD Bar */}
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 12,
-          padding: "12px 20px",
-          background: "#131915",
-          borderBottom: "1px solid #2E3B30",
-          zIndex: 10,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              background: charVisual.color,
-              border: `2px solid ${charVisual.borderColor}`,
-              borderRadius: 3,
-            }}
+      {/* Mapa ocupando toda a tela */}
+      <div style={{ width: "100%", height: "100%", position: "relative" }}>
+        <Map
+          defaultCenter={initialCoords}
+          defaultZoom={16}
+          gestureHandling="greedy"
+          disableDefaultUI={true}
+          zoomControl={false}
+          streetViewControl={false}
+          mapTypeControl={false}
+          fullscreenControl={false}
+          styles={GAME_MAP_STYLES}
+          style={{ width: "100%", height: "100%" }}
+        >
+          {/* Marcador do Jogador */}
+          <Marker
+            position={playerCoords}
+            title={`${characterName} (Sua posição)`}
+            icon={characterSquareIcon}
+            zIndex={1000}
           />
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#EDE6D3" }}>
-              {playerName} •{" "}
-              <span style={{ color: "#C89B5C" }}>{characterName}</span>
-            </div>
-            <div
-              style={{
-                fontFamily: "'IBM Plex Mono', monospace",
-                fontSize: 11,
-                color: "#8A9A8C",
-                display: "flex",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <span>
-                Vida:{" "}
-                <strong style={{ color: "#EDE6D3" }}>
-                  {vidaAtual}/{vidaFinal}
-                </strong>
-              </span>
-              <span>
-                Energia:{" "}
-                <strong style={{ color: "#38BDF8" }}>
-                  {Number(energiaAtual).toFixed(2)}/{energiaMaxima}
-                </strong>
-                {lastRouteSummary && (
-                  <span style={{ color: "#F87171", marginLeft: 4 }}>
-                    (-{Number(lastRouteSummary.energiaConsumida).toFixed(2)})
-                  </span>
+
+          {/* Marcadores dos Places (somente das 10 categorias permitidas) */}
+          {places.map((place) => {
+            const isSelected = selectedPlace?.id === place.id;
+            return (
+              <Marker
+                key={place.id}
+                position={{ lat: place.lat, lng: place.lng }}
+                title={`${place.name} (${place.category})`}
+                icon={createPlaceIconDataUrl(
+                  place.color,
+                  isSelected,
+                  place.isBossSpecial,
                 )}
-              </span>
-              <span>
-                Poder: <strong style={{ color: "#C89B5C" }}>{nivelDePoder}</strong>
-              </span>
-            </div>
-          </div>
-        </div>
+                zIndex={isSelected ? 500 : place.isBossSpecial ? 300 : 100}
+                onClick={() => handleSelectPlace(place)}
+              />
+            );
+          })}
+        </Map>
 
-        <div
+        {/* Menu Superior — Overlay Minimalista Integrado ao Mapa (Seção 8) */}
+        <header
+          data-testid="top-hud-overlay"
           style={{
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 12,
-            color: isMoving ? "#38BDF8" : "#C89B5C",
-          }}
-        >
-          {isCalculatingRoute
-            ? `Calculando rota para ${selectedPlace?.name}...`
-            : isMoving
-              ? `Em movimento até: ${selectedPlace?.name}...`
-              : selectedPlace
-                ? `Local atual: ${selectedPlace.name}`
-                : "Selecione um ponto de interesse no mapa"}
-        </div>
-
-        <button
-          type="button"
-          onClick={onExitToMenu}
-          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            right: isPlacesPanelCollapsed ? 180 : 324,
+            maxWidth: 680,
+            background: "rgba(19, 25, 21, 0.82)",
+            backdropFilter: "blur(6px)",
+            border: "1px solid rgba(200, 155, 92, 0.45)",
+            borderRadius: 10,
             padding: "8px 14px",
-            background: "transparent",
-            border: "1px solid #2E3B30",
-            borderRadius: 6,
-            color: "#EDE6D3",
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 12,
-            cursor: "pointer",
-          }}
-        >
-          Menu Inicial
-        </button>
-      </header>
-
-      {/* Error Banners */}
-      {(placesError || routeError) && (
-        <div
-          role="alert"
-          style={{
-            background: "#3B1818",
-            borderBottom: "1px solid #EF4444",
-            color: "#FCA5A5",
-            padding: "10px 20px",
-            fontSize: 13,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 12,
-            zIndex: 10,
+            flexWrap: "wrap",
+            gap: 14,
+            zIndex: 15,
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
+            pointerEvents: "auto",
+            transition: "right 0.2s ease",
           }}
         >
-          <span>{routeError || placesError}</span>
-          {placesError && (
-            <button
-              type="button"
-              onClick={() => fetchNearbyPlaces(playerCoords, { forceRefresh: true })}
+          {/* Lado Esquerdo: Linha 1 (Nome + Nível de Poder) e Linha 2 (Personagem + Moedas) */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
               style={{
-                padding: "5px 10px",
-                background: "#EF4444",
-                color: "#FFFFFF",
-                border: "none",
+                width: 28,
+                height: 28,
+                background: charVisual.color,
+                border: `2px solid ${charVisual.borderColor}`,
                 borderRadius: 4,
-                fontSize: 12,
-                cursor: "pointer",
+                flexShrink: 0,
               }}
-            >
-              Tentar novamente
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Map + Side Panel Container */}
-      <div
-        style={{
-          position: "relative",
-          flex: 1,
-          width: "100%",
-          display: "flex",
-        }}
-      >
-        <div style={{ flex: 1, height: "100%", position: "relative" }}>
-          <Map
-            defaultCenter={initialCoords}
-            defaultZoom={16}
-            gestureHandling="greedy"
-            disableDefaultUI={false}
-            streetViewControl={false}
-            mapTypeControl={false}
-            styles={GAME_MAP_STYLES}
-            style={{ width: "100%", height: "100%" }}
-          >
-            {/* Player Character Marker */}
-            <Marker
-              position={playerCoords}
-              title={`${characterName} (Sua posição)`}
-              icon={characterSquareIcon}
-              zIndex={1000}
             />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {/* Primeira linha: Nome do jogador + Nível de Poder ao lado */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  data-testid="hud-player-name"
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: "#EDE6D3",
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {playerName}
+                </span>
+                <span
+                  data-testid="hud-player-power"
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#C89B5C",
+                    background: "rgba(200, 155, 92, 0.14)",
+                    border: "1px solid rgba(200, 155, 92, 0.4)",
+                    borderRadius: 4,
+                    padding: "1px 6px",
+                  }}
+                >
+                  Poder {nivelDePoder}
+                </span>
+              </div>
 
-            {/* Nearby Places Markers */}
-            {places.map((place) => {
-              const isSelected = selectedPlace?.id === place.id;
-              return (
-                <Marker
-                  key={place.id}
-                  position={{ lat: place.lat, lng: place.lng }}
-                  title={`${place.name} (${place.category})`}
-                  icon={createPlaceIconDataUrl(place.color, isSelected)}
-                  zIndex={isSelected ? 500 : 100}
-                  onClick={() => handleSelectPlace(place)}
+              {/* Segunda linha (em tamanho menor): Nome do personagem selecionado + Quantidade de Moedas */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 11,
+                  color: "#9CAEA0",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span data-testid="hud-character-name">{characterName}</span>
+                <span style={{ color: "#3A4A3C" }}>•</span>
+                <span
+                  data-testid="hud-player-coins"
+                  style={{ color: "#FBBF24", fontWeight: 600 }}
+                >
+                  Moedas: {moedas}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Lado Direito: Duas Barras (Vida e Energia) */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              minWidth: 185,
+              flex: "0 1 220px",
+            }}
+          >
+            {/* Barra de Vida */}
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 10,
+                  color: "#EDE6D3",
+                  marginBottom: 2,
+                }}
+              >
+                <span>VIDA</span>
+                <strong data-testid="hud-health-value">
+                  {vidaAtual}/{vidaFinal}
+                </strong>
+              </div>
+              <div
+                style={{
+                  width: "100%",
+                  height: 7,
+                  background: "rgba(15, 20, 16, 0.85)",
+                  border: "1px solid #2E3B30",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  data-testid="hud-health-bar-fill"
+                  style={{
+                    width: `${vidaPercent}%`,
+                    height: "100%",
+                    background: "linear-gradient(90deg, #DC2626, #EF4444)",
+                    transition: "width 0.25s ease",
+                  }}
                 />
-              );
-            })}
-          </Map>
-        </div>
+              </div>
+            </div>
 
-        {/* Places Sidebar / Overlay List */}
+            {/* Barra de Energia */}
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 10,
+                  color: "#EDE6D3",
+                  marginBottom: 2,
+                }}
+              >
+                <span>ENERGIA</span>
+                <strong data-testid="hud-energy-value">
+                  {Number(energiaAtual).toFixed(1)}/{energiaMaxima}
+                </strong>
+              </div>
+              <div
+                style={{
+                  width: "100%",
+                  height: 7,
+                  background: "rgba(15, 20, 16, 0.85)",
+                  border: "1px solid #2E3B30",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  data-testid="hud-energy-bar-fill"
+                  style={{
+                    width: `${energiaPercent}%`,
+                    height: "100%",
+                    background: "linear-gradient(90deg, #0284C7, #38BDF8)",
+                    transition: "width 0.25s ease",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Indicador discreto de deslocamento / erro */}
+        {(isCalculatingRoute || isMoving || placesError || routeError) && (
+          <div
+            style={{
+              position: "absolute",
+              top: 86,
+              left: 12,
+              maxWidth: 440,
+              background:
+                placesError || routeError
+                  ? "rgba(59, 24, 24, 0.9)"
+                  : "rgba(19, 25, 21, 0.82)",
+              border:
+                placesError || routeError
+                  ? "1px solid #EF4444"
+                  : "1px solid #2E3B30",
+              borderRadius: 8,
+              padding: "6px 12px",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 11,
+              color: placesError || routeError ? "#FCA5A5" : "#38BDF8",
+              zIndex: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span>
+              {routeError ||
+                placesError ||
+                (isCalculatingRoute
+                  ? `Calculando rota até ${selectedPlace?.name}...`
+                  : `Em deslocamento até ${selectedPlace?.name}...`)}
+            </span>
+            {placesError && (
+              <button
+                type="button"
+                onClick={() =>
+                  fetchNearbyPlaces(playerCoords, { forceRefresh: true })
+                }
+                style={{
+                  padding: "3px 8px",
+                  background: "#EF4444",
+                  color: "#FFFFFF",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  cursor: "pointer",
+                }}
+              >
+                Tentar novamente
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Painel de Locais Próximos (Seção 4: recolhível/expansível com seta no canto superior direito) */}
         <aside
+          data-testid="nearby-places-panel"
           style={{
-            width: 310,
+            position: "absolute",
+            top: 12,
+            right: 12,
+            width: isPlacesPanelCollapsed ? "auto" : 300,
             maxWidth: "42vw",
-            height: "100%",
-            background: "#131915",
-            borderLeft: "1px solid #2E3B30",
+            maxHeight: isPlacesPanelCollapsed ? "auto" : "calc(100vh - 96px)",
+            background: "rgba(19, 25, 21, 0.9)",
+            backdropFilter: "blur(6px)",
+            border: "1px solid #2E3B30",
+            borderRadius: 10,
             display: "flex",
             flexDirection: "column",
-            zIndex: 5,
+            zIndex: 15,
+            boxShadow: "0 10px 28px rgba(0, 0, 0, 0.5)",
+            transition: "all 0.2s ease",
+            overflow: "hidden",
           }}
         >
           <div
             style={{
-              padding: "14px 16px",
-              borderBottom: "1px solid #2E3B30",
+              padding: isPlacesPanelCollapsed ? "8px 12px" : "12px 14px",
+              borderBottom: isPlacesPanelCollapsed
+                ? "none"
+                : "1px solid #2E3B30",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: 10,
             }}
           >
             <span
               style={{
                 fontFamily: "'IBM Plex Mono', monospace",
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 600,
                 color: "#C89B5C",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
+                whiteSpace: "nowrap",
               }}
             >
               Locais Próximos ({places.length})
             </span>
 
-            {isLoadingPlaces && (
-              <span
-                style={{
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 11,
-                  color: "#8A9A8C",
-                }}
-              >
-                Atualizando...
-              </span>
-            )}
-          </div>
-
-          <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: 12,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            {!isLoadingPlaces && places.length === 0 && !placesError && (
-              <div
-                style={{
-                  padding: 16,
-                  fontSize: 13,
-                  color: "#7C8C7E",
-                  textAlign: "center",
-                }}
-              >
-                Nenhum ponto de interesse carregado.
-              </div>
-            )}
-
-            {places.map((place) => {
-              const isSelected = selectedPlace?.id === place.id;
-              return (
-                <button
-                  key={place.id}
-                  type="button"
-                  onClick={() => handleSelectPlace(place)}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {!isPlacesPanelCollapsed && isLoadingPlaces && (
+                <span
                   style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 10,
-                    width: "100%",
-                    padding: "10px 12px",
-                    background: isSelected ? "#1F2A22" : "#18201A",
-                    border: isSelected
-                      ? "1px solid #38BDF8"
-                      : "1px solid #26332A",
-                    borderRadius: 8,
-                    color: "#EDE6D3",
-                    textAlign: "left",
-                    cursor: "pointer",
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 10,
+                    color: "#8A9A8C",
                   }}
                 >
-                  <span
-                    style={{
-                      width: 14,
-                      height: 14,
-                      marginTop: 3,
-                      borderRadius: 3,
-                      background: place.color || "#C89B5C",
-                      flexShrink: 0,
-                    }}
-                  />
-                  <div style={{ overflow: "hidden" }}>
-                    <div
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        color: "#EDE6D3",
-                        marginBottom: 3,
-                        wordBreak: "break-word",
-                      }}
-                    >
-                      {place.name}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "'IBM Plex Mono', monospace",
-                        fontSize: 11,
-                        color: "#8A9A8C",
-                      }}
-                    >
-                      Tipo: {place.category}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+                  ...
+                </span>
+              )}
+
+              {/* Pequena seta no canto superior direito para recolher e expandir */}
+              <button
+                type="button"
+                data-testid="toggle-nearby-places-btn"
+                aria-expanded={!isPlacesPanelCollapsed}
+                aria-label={
+                  isPlacesPanelCollapsed
+                    ? "Expandir painel de locais próximos"
+                    : "Recolher painel de locais próximos"
+                }
+                onClick={() => setIsPlacesPanelCollapsed((prev) => !prev)}
+                style={{
+                  width: 24,
+                  height: 24,
+                  background: "#18201A",
+                  border: "1px solid #3A4A3C",
+                  borderRadius: 5,
+                  color: "#EDE6D3",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                }}
+              >
+                {isPlacesPanelCollapsed ? "▾" : "▴"}
+              </button>
+            </div>
           </div>
+
+          {!isPlacesPanelCollapsed && (
+            <div
+              data-testid="nearby-places-list"
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: 10,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              {!isLoadingPlaces && places.length === 0 && !placesError && (
+                <div
+                  style={{
+                    padding: 14,
+                    fontSize: 12,
+                    color: "#7C8C7E",
+                    textAlign: "center",
+                  }}
+                >
+                  Nenhum ponto de interesse permitido encontrado.
+                </div>
+              )}
+
+              {places.map((place) => {
+                const isSelected = selectedPlace?.id === place.id;
+                return (
+                  <button
+                    key={place.id}
+                    type="button"
+                    data-testid={`nearby-place-item-${place.id}`}
+                    onClick={() => handleSelectPlace(place)}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 10,
+                      width: "100%",
+                      padding: "9px 11px",
+                      background: isSelected ? "#1F2A22" : "#18201A",
+                      border: isSelected
+                        ? "1px solid #38BDF8"
+                        : "1px solid #26332A",
+                      borderRadius: 8,
+                      color: "#EDE6D3",
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        marginTop: 3,
+                        borderRadius: 3,
+                        background: place.color || "#C89B5C",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <div style={{ overflow: "hidden" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#EDE6D3",
+                          marginBottom: 2,
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {place.name}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "'IBM Plex Mono', monospace",
+                          fontSize: 10,
+                          color: "#8A9A8C",
+                        }}
+                      >
+                        {place.category}
+                        {place.isBossSpecial ? " • BOSS" : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </aside>
       </div>
 
-      {/* Arrival Modal */}
+      {/* Submenu padronizado do Place selecionado (Seções 5, 9.2, 9.3, 10, 11) */}
       <PlaceArrivalModal
         place={arrivedPlace}
         routeSummary={lastRouteSummary}
+        hasArrived={hasArrivedAtPlace}
+        isCalculatingRoute={isCalculatingRoute}
+        playerEnergy={energiaAtual}
+        onGoToPlace={handleGoToPlace}
+        onStartArenaCombat={(targetPlace) => {
+          setArrivedPlace(null);
+          startCombatSession(COMBAT_TYPES.ARENA, targetPlace);
+        }}
+        onStartBossCombat={(targetPlace) => {
+          setArrivedPlace(null);
+          startCombatSession(COMBAT_TYPES.BOSS, targetPlace);
+        }}
+        onOpenShop={(targetPlace) => {
+          setArrivedPlace(null);
+          setActiveShopPlace(targetPlace);
+        }}
         onClose={() => setArrivedPlace(null)}
       />
+
+      {/* Interface da Loja (Seção 11) */}
+      {activeShopPlace && (
+        <PlaceShopModal
+          place={activeShopPlace}
+          playerState={playerState}
+          onClose={() => setActiveShopPlace(null)}
+        />
+      )}
+
+      {/* Sistema de Combate Existente Integrado: Emboscada, Arena e Boss (Seção 9) */}
+      {activeCombatSession && (
+        <CombatScreen
+          personagem={{
+            id: playerState?.personagemAtual?.id || character?.id || 1,
+            nome: characterName,
+            vantagem: playerState?.personagemAtual?.vantagem || "Equilibrado",
+            placeholderKey:
+              playerState?.personagemAtual?.placeholderKey ||
+              character?.placeholderKey ||
+              "char_1",
+            vida: vidaFinal,
+            vidaAtual: Math.max(1, vidaAtual),
+            energia: energiaMaxima,
+            energiaAtual,
+            ataque: playerState?.atributos?.danoFinal ?? 10,
+            defesa: playerState?.atributos?.defesaFinal ?? 0,
+            velocidade: (playerState?.atributos?.velocidadeFinal ?? 0) + 12,
+          }}
+          sessaoCombate={activeCombatSession}
+          onFinishCombat={handleFinishCombat}
+        />
+      )}
     </div>
   );
 }
@@ -1138,6 +1618,7 @@ export default function GoogleMapDemo({
   character = { id: 1, name: "Explorador #1" },
   playerState = null,
   onRegisterRouteTraversal,
+  onUpdatePlayerHp,
   onExitToMenu,
 }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -1241,6 +1722,7 @@ export default function GoogleMapDemo({
         character={character}
         playerState={playerState}
         onRegisterRouteTraversal={onRegisterRouteTraversal}
+        onUpdatePlayerHp={onUpdatePlayerHp}
         onExitToMenu={onExitToMenu}
       />
     </APIProvider>

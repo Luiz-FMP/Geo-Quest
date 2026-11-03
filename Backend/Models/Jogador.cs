@@ -25,6 +25,8 @@ public class Jogador
 
     public int VelocidadeBase { get; set; } = 0;
 
+    public int Moedas { get; set; } = 0;
+
     public Personagem? Personagem { get; set; }
 
     public EstatisticaJogador? Estatisticas { get; set; }

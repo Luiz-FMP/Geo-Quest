@@ -1,11 +1,141 @@
-export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
+import { PLACE_FUNCTIONS } from "../utils/placeCategories";
+
+const DISABLED_GRAY_BUTTON_STYLE = {
+  width: "100%",
+  padding: "12px 18px",
+  background: "#262B28",
+  border: "1px solid #3E4641",
+  borderRadius: 6,
+  color: "#7B857E",
+  fontFamily: "'IBM Plex Mono', monospace",
+  fontWeight: 700,
+  fontSize: 14,
+  letterSpacing: "0.06em",
+  cursor: "not-allowed",
+  opacity: 0.85,
+};
+
+export default function PlaceArrivalModal({
+  place,
+  routeSummary,
+  hasArrived = false,
+  isCalculatingRoute = false,
+  playerEnergy = 100,
+  onGoToPlace,
+  onStartArenaCombat,
+  onStartBossCombat,
+  onOpenShop,
+  onClose,
+}) {
   if (!place) return null;
+
+  const isBossSpecial =
+    place.isBossSpecial ||
+    place.subcategory === "shopping_mall" ||
+    place.placeFunction === PLACE_FUNCTIONS.BOSS;
+
+  const isArena =
+    !isBossSpecial &&
+    (place.placeFunction === PLACE_FUNCTIONS.ARENA ||
+      place.category === "Entertainment and Recreation");
+
+  const isShop =
+    !isBossSpecial &&
+    (place.placeFunction === PLACE_FUNCTIONS.SHOP ||
+      place.category === "Shopping");
+
+  const descriptionText = isBossSpecial
+    ? "Local especial de Boss. Enfrente o Boss deste território em combate."
+    : isArena
+      ? "Este local permite enfrentar desafios de combate em uma arena."
+      : isShop
+        ? "Explore esta loja e confira os produtos disponíveis."
+        : "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.";
+
+  const requiredEnergy = Number(routeSummary?.energiaConsumida ?? 0);
+  const distanceKm = Number(routeSummary?.distanciaKm ?? 0);
+  const currentEnergy = Number(playerEnergy ?? 0);
+  const hasEnoughEnergy = currentEnergy >= requiredEnergy;
+
+  const canClickGo = !hasArrived && !isCalculatingRoute && hasEnoughEnergy;
+  const canClickPlaceAction =
+    hasArrived && (isBossSpecial || isArena || isShop);
+
+  const goButtonLabel = hasArrived
+    ? "IR (VOCÊ JÁ ESTÁ NESTE LOCAL)"
+    : isCalculatingRoute
+      ? "CALCULANDO ROTA..."
+      : !hasEnoughEnergy
+        ? `IR — ENERGIA INSUFICIENTE (${requiredEnergy.toFixed(1)} necessária)`
+        : `IR (${distanceKm.toFixed(2)} km • -${requiredEnergy.toFixed(1)} Energia)`;
+
+  const placeActionLabel = isBossSpecial
+    ? "BOSS"
+    : isArena
+      ? "COMBATE"
+      : isShop
+        ? "LOJA"
+        : "EM DESENVOLVIMENTO";
+
+  const activePlaceActionStyle = isBossSpecial
+    ? {
+        width: "100%",
+        padding: "12px 18px",
+        background: "#D97706",
+        border: "1px solid #FCD34D",
+        borderRadius: 6,
+        color: "#FFFFFF",
+        fontFamily: "'IBM Plex Mono', monospace",
+        fontWeight: 700,
+        fontSize: 14,
+        letterSpacing: "0.06em",
+        cursor: "pointer",
+      }
+    : isArena
+      ? {
+          width: "100%",
+          padding: "12px 18px",
+          background: "#DC2626",
+          border: "1px solid #FCA5A5",
+          borderRadius: 6,
+          color: "#FFFFFF",
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: 700,
+          fontSize: 14,
+          letterSpacing: "0.06em",
+          cursor: "pointer",
+        }
+      : {
+          width: "100%",
+          padding: "12px 18px",
+          background: "#C89B5C",
+          border: "none",
+          borderRadius: 6,
+          color: "#161D18",
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontWeight: 700,
+          fontSize: 14,
+          letterSpacing: "0.06em",
+          cursor: "pointer",
+        };
+
+  function handlePlaceActionClick() {
+    if (!canClickPlaceAction) return;
+    if (isBossSpecial && onStartBossCombat) {
+      onStartBossCombat(place);
+    } else if (isArena && onStartArenaCombat) {
+      onStartArenaCombat(place);
+    } else if (isShop && onOpenShop) {
+      onOpenShop(place);
+    }
+  }
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="place-modal-title"
+      data-testid="place-submenu-modal"
       style={{
         position: "fixed",
         inset: 0,
@@ -20,34 +150,45 @@ export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
       <div
         style={{
           background: "#1B241D",
-          border: "1px solid #C89B5C",
+          border: `1px solid ${isBossSpecial ? "#F59E0B" : isArena ? "#EF4444" : "#C89B5C"}`,
           borderRadius: 12,
           maxWidth: 440,
           width: "100%",
-          padding: "28px 24px",
+          padding: "24px",
           boxShadow: "0 20px 50px rgba(0, 0, 0, 0.65)",
           color: "#EDE6D3",
           textAlign: "left",
+          position: "relative",
         }}
       >
-        <div
+        <button
+          type="button"
+          aria-label="Fechar menu do local"
+          onClick={onClose}
           style={{
+            position: "absolute",
+            top: 14,
+            right: 14,
+            background: "transparent",
+            border: "1px solid #2E3B30",
+            borderRadius: 6,
+            color: "#8A9A8C",
             fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 11,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "#C89B5C",
-            marginBottom: 8,
+            fontSize: 12,
+            padding: "4px 8px",
+            cursor: "pointer",
           }}
         >
-          Destino Alcançado
-        </div>
+          ✕
+        </button>
 
+        {/* 1. Nome do Place */}
         <h3
           id="place-modal-title"
+          data-testid="place-menu-name"
           style={{
-            margin: "0 0 12px 0",
-            fontSize: 24,
+            margin: "0 32px 12px 0",
+            fontSize: 22,
             fontWeight: 700,
             color: "#EDE6D3",
             lineHeight: 1.25,
@@ -56,6 +197,7 @@ export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
           {place.name}
         </h3>
 
+        {/* 2. Categoria do Place (+ identificação especial de Boss quando shopping_mall) */}
         <div
           style={{
             display: "flex",
@@ -65,6 +207,7 @@ export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
           }}
         >
           <div
+            data-testid="place-menu-category"
             style={{
               display: "inline-block",
               padding: "5px 10px",
@@ -76,8 +219,27 @@ export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
               color: "#EDE6D3",
             }}
           >
-            Tipo: {place.category || "Ponto de Interesse"}
+            Categoria: {place.category}
           </div>
+
+          {isBossSpecial && (
+            <div
+              data-testid="place-menu-boss-badge"
+              style={{
+                display: "inline-block",
+                padding: "5px 10px",
+                borderRadius: 6,
+                background: "#451A03",
+                border: "1px solid #F59E0B",
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#FCD34D",
+              }}
+            >
+              Local Especial de Boss (shopping_mall)
+            </div>
+          )}
 
           {routeSummary && (
             <div
@@ -85,32 +247,21 @@ export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
                 display: "inline-block",
                 padding: "5px 10px",
                 borderRadius: 6,
-                background: "#13293D",
-                border: "1px solid #38BDF8",
+                background: !hasArrived && !hasEnoughEnergy ? "#3B1818" : "#13293D",
+                border: `1px solid ${!hasArrived && !hasEnoughEnergy ? "#EF4444" : "#38BDF8"}`,
                 fontFamily: "'IBM Plex Mono', monospace",
-                fontSize: 12,
-                color: "#38BDF8",
+                fontSize: 11,
+                color: !hasArrived && !hasEnoughEnergy ? "#FCA5A5" : "#38BDF8",
               }}
             >
-              Rota: {Number(routeSummary.distanciaKm || 0).toFixed(2)} km • -{Number(routeSummary.energiaConsumida || 0).toFixed(2)} Energia
+              {distanceKm.toFixed(2)} km • Custo: {requiredEnergy.toFixed(2)} Energia
             </div>
           )}
         </div>
 
-        {place.address && (
-          <p
-            style={{
-              margin: "0 0 14px 0",
-              fontSize: 13,
-              color: "#9CAEA0",
-              fontFamily: "system-ui, sans-serif",
-            }}
-          >
-            Endereço: {place.address}
-          </p>
-        )}
-
+        {/* 3. Breve descrição da função daquele tipo de local no jogo */}
         <div
+          data-testid="place-menu-description"
           style={{
             padding: "12px 14px",
             background: "#131915",
@@ -118,32 +269,66 @@ export default function PlaceArrivalModal({ place, routeSummary, onClose }) {
             borderRadius: 8,
             fontFamily: "'IBM Plex Mono', monospace",
             fontSize: 12,
-            color: "#8A9A8C",
-            marginBottom: 22,
+            color: "#9CAEA0",
+            marginBottom: 18,
             lineHeight: 1.5,
           }}
         >
-          {place.interactionHint ||
-            "Placeholder de interação: futuras missões ou ações específicas deste tipo de local serão exibidas aqui."}
+          {descriptionText}
         </div>
 
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            width: "100%",
-            padding: "12px 18px",
-            background: "#C89B5C",
-            border: "none",
-            borderRadius: 6,
-            color: "#161D18",
-            fontWeight: 700,
-            fontSize: 14,
-            cursor: "pointer",
-          }}
-        >
-          Continuar Explorando
-        </button>
+        {/* 4. Duas opções na parte inferior:
+             - Opção de cima: IR para o Place (fica cinza se não tiver energia suficiente ou se já chegou)
+             - Opção de baixo: Ação do próprio Place (fica cinza até o personagem chegar lá) */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <button
+            type="button"
+            data-testid="place-action-go"
+            disabled={!canClickGo}
+            onClick={() => canClickGo && onGoToPlace && onGoToPlace(place)}
+            style={
+              canClickGo
+                ? {
+                    width: "100%",
+                    padding: "12px 18px",
+                    background: "#0284C7",
+                    border: "1px solid #38BDF8",
+                    borderRadius: 6,
+                    color: "#FFFFFF",
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    letterSpacing: "0.05em",
+                    cursor: "pointer",
+                  }
+                : DISABLED_GRAY_BUTTON_STYLE
+            }
+          >
+            {goButtonLabel}
+          </button>
+
+          <button
+            type="button"
+            data-testid={
+              isBossSpecial
+                ? "place-action-boss"
+                : isArena
+                  ? "place-action-combat"
+                  : isShop
+                    ? "place-action-shop"
+                    : "place-action-wip"
+            }
+            disabled={!canClickPlaceAction}
+            onClick={handlePlaceActionClick}
+            style={
+              canClickPlaceAction
+                ? activePlaceActionStyle
+                : DISABLED_GRAY_BUTTON_STYLE
+            }
+          >
+            {placeActionLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

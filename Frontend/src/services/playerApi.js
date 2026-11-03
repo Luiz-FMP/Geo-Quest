@@ -1,4 +1,4 @@
-const DIRECT_API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5208";
+const DIRECT_API_BASE = import.meta.env?.VITE_API_BASE_URL || "http://127.0.0.1:5208";
 const LOCAL_STORAGE_KEY = "geoquest_player_state_v1";
 
 const DEFAULT_CHARACTERS = [
@@ -25,6 +25,44 @@ const DEFAULT_CHARACTERS = [
     vantagem: "Resistência",
     disponivel: true,
     placeholderKey: "char_3",
+  },
+];
+
+const DEFAULT_ENEMIES = [
+  {
+    id: 1,
+    nome: "Batedor Urbano",
+    descricao: "Oponente encontrado durante o deslocamento pelas rotas da cidade.",
+    vida: 30,
+    ataque: 6,
+    defesa: 1,
+  },
+  {
+    id: 2,
+    nome: "Desafiante da Arena",
+    descricao: "Combatente preparado para disputas em locais de entretenimento e recreação.",
+    vida: 40,
+    ataque: 8,
+    defesa: 2,
+  },
+  {
+    id: 3,
+    nome: "Vigia das Ruas",
+    descricao: "Inimigo ágil que patrulha trajetos movimentados.",
+    vida: 35,
+    ataque: 7,
+    defesa: 1,
+  },
+];
+
+const DEFAULT_BOSSES = [
+  {
+    id: 1,
+    nome: "Guardião do Shopping",
+    vida: 60,
+    ataque: 9,
+    defesa: 2,
+    cidadeId: 1,
   },
 ];
 
@@ -69,6 +107,7 @@ function recalculateState(state) {
   const danoBase = state.atributos?.danoBase ?? 10;
   const defesaBase = state.atributos?.defesaBase ?? 0;
   const velocidadeBase = state.atributos?.velocidadeBase ?? 0;
+  const moedas = Math.max(0, Number(state.moedas ?? state.atributos?.moedas ?? 0) || 0);
 
   const equippedItems = (state.equipamentos || [])
     .map((s) => s.itemEquipado)
@@ -113,6 +152,7 @@ function recalculateState(state) {
 
   return {
     ...state,
+    moedas,
     atributos: {
       vidaBase,
       vidaModificador: vidaMod,
@@ -133,6 +173,7 @@ function recalculateState(state) {
       velocidadeFinal,
       nivelDePoder,
       consumoEnergiaPorKm,
+      moedas,
     },
   };
 }
@@ -154,6 +195,7 @@ function getOrCreateLocalState() {
     id: 1,
     nome: "Explorador",
     personagemId: 1,
+    moedas: 0,
     personagemAtual: DEFAULT_CHARACTERS[0],
     atributos: {
       vidaBase: 50,
@@ -163,6 +205,7 @@ function getOrCreateLocalState() {
       danoBase: 10,
       defesaBase: 0,
       velocidadeBase: 0,
+      moedas: 0,
     },
     mochila: [createDebugItemInstance(1, 0)],
     equipamentos: DEFAULT_EQUIP_SLOTS,
@@ -199,7 +242,7 @@ async function requestApi(path, options = {}) {
     ...(options.headers || {}),
   };
 
-  const candidateUrls = import.meta.env.VITE_API_BASE_URL
+  const candidateUrls = import.meta.env?.VITE_API_BASE_URL
     ? [`${import.meta.env.VITE_API_BASE_URL}${path}`, path]
     : [path, `${DIRECT_API_BASE}${path}`, `http://localhost:5208${path}`];
 
@@ -220,7 +263,6 @@ async function requestApi(path, options = {}) {
       const isJson = contentType.includes("application/json");
 
       if (!response.ok) {
-        // Caso o proxy do Vite retorne 502/503/504 ou 404 HTML, tenta o próximo candidato
         if (
           response.status === 502 ||
           response.status === 503 ||
@@ -266,8 +308,7 @@ export async function fetchJogadorAtual() {
   try {
     const serverState = await requestApi("/api/jogadores/atual", { method: "GET" });
     if (serverState) {
-      saveLocalState(serverState);
-      return serverState;
+      return saveLocalState(serverState);
     }
   } catch {
     // Fallback local sincronizado
@@ -312,6 +353,33 @@ export async function alterarPersonagemJogador(personagemId) {
     local.personagemId = char.id;
     local.personagemAtual = char;
     local.estatisticas.personagemUtilizado = char.nome;
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    return saveLocalState(local);
+  }
+}
+
+export async function atualizarVidaJogador(vidaAtual, energiaAtual = null) {
+  const safeVida = Math.max(0, Math.round(Number(vidaAtual) || 0));
+  const payload = { vidaAtual: safeVida };
+  if (energiaAtual !== null && energiaAtual !== undefined) {
+    payload.energiaAtual = Math.max(0, Number(Number(energiaAtual).toFixed(2)) || 0);
+  }
+
+  try {
+    const updated = await requestApi("/api/jogadores/atual/vida", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    return saveLocalState(updated);
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+    const local = getOrCreateLocalState();
+    const maxVida = local.atributos?.vidaFinal ?? 50;
+    local.atributos.vidaAtual = Math.min(maxVida, Math.max(0, safeVida));
+    if (payload.energiaAtual !== undefined) {
+      const maxEnergia = local.atributos?.energiaMaximaFinal ?? 100;
+      local.atributos.energiaAtual = Math.min(maxEnergia, Math.max(0, payload.energiaAtual));
+    }
     local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
     return saveLocalState(local);
   }
@@ -504,4 +572,28 @@ export async function fetchPersonagensDisponiveis() {
   } catch {
     return DEFAULT_CHARACTERS;
   }
+}
+
+export async function fetchInimigosDisponiveis() {
+  try {
+    const list = await requestApi("/api/inimigos", { method: "GET" });
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+  } catch {
+    // Fallback local
+  }
+  return DEFAULT_ENEMIES;
+}
+
+export async function fetchBossesDisponiveis() {
+  try {
+    const list = await requestApi("/api/bosses", { method: "GET" });
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+  } catch {
+    // Fallback local
+  }
+  return DEFAULT_BOSSES;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import CombatArena from "./CombatArena";
 import CombatHUD from "./CombatHud";
 
@@ -7,8 +7,17 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
   const [inimigos, setInimigos] = useState(sessaoCombate.rondas[0]);
   const [alvoIndex, setAlvoIndex] = useState(0);
 
-  const [hpJogador, setHpJogador] = useState(personagem.vida || 50);
-  const [energiaJogador, setEnergiaJogador] = useState(personagem.energia || 100);
+  const initialHp =
+    typeof personagem.vidaAtual === "number" && personagem.vidaAtual > 0
+      ? personagem.vidaAtual
+      : personagem.vida || 50;
+  const initialEnergia =
+    typeof personagem.energiaAtual === "number" && personagem.energiaAtual >= 0
+      ? personagem.energiaAtual
+      : personagem.energia || 100;
+
+  const [hpJogador, setHpJogador] = useState(initialHp);
+  const [energiaJogador, setEnergiaJogador] = useState(initialEnergia);
   const [defendendo, setDefendendo] = useState(false);
   const [turnoBloqueado, setTurnoBloqueado] = useState(false);
 

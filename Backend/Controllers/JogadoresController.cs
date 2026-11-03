@@ -96,6 +96,41 @@ public class JogadoresController : ControllerBase
         return Ok(estado);
     }
 
+    [HttpPut("atual/vida")]
+    public async Task<ActionResult<JogadorEstadoDto>> AtualizarVidaAtual(
+        [FromBody] AtualizarVidaJogadorRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { mensagem = "Dados de vida inválidos." });
+        }
+
+        var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+        var atributos = _statsCalculator.CalcularAtributos(jogador);
+
+        jogador.VidaAtual = Math.Clamp(request.VidaAtual, 0, atributos.VidaFinal);
+
+        if (request.EnergiaAtual.HasValue && !double.IsNaN(request.EnergiaAtual.Value))
+        {
+            jogador.EnergiaAtual = Math.Clamp(
+                Math.Round(request.EnergiaAtual.Value, 2),
+                0.0,
+                atributos.EnergiaMaximaFinal
+            );
+        }
+
+        if (jogador.Estatisticas is not null)
+        {
+            jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+        return Ok(estado);
+    }
+
     [HttpGet("atual/atributos")]
     public async Task<ActionResult<AtributosDetalhadosDto>> GetAtributos(CancellationToken cancellationToken)
     {
@@ -145,7 +180,6 @@ public class JogadoresController : ControllerBase
 
         int? slotAnterior = item.SlotIndice;
 
-        // Verifica se já existe outro item no slot de destino na mesma aba da mochila
         var itemNoDestino = jogador.ItensInventario.FirstOrDefault(i =>
             i.Id != item.Id &&
             !i.Equipado &&

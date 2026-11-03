@@ -156,7 +156,22 @@ public class GooglePlacesClient : IGooglePlacesClient
             }
         }
 
-        var (category, rawType, interactionHint) = _categoryMapper.MapTypes(rawTypes);
+        string? primaryType = null;
+        if (item.TryGetProperty("primaryType", out var primaryTypeEl) && primaryTypeEl.ValueKind == JsonValueKind.String)
+        {
+            primaryType = primaryTypeEl.GetString();
+        }
+        else if (item.TryGetProperty("primary_type", out var primaryTypeSnakeEl) && primaryTypeSnakeEl.ValueKind == JsonValueKind.String)
+        {
+            primaryType = primaryTypeSnakeEl.GetString();
+        }
+
+        var classification = _categoryMapper.ClassifyPlace(primaryType, rawTypes);
+        if (classification is null)
+        {
+            return null;
+        }
+
         var address = item.TryGetProperty("vicinity", out var vicinityEl) ? vicinityEl.GetString() : null;
 
         return new GamePoiDto(
@@ -164,10 +179,15 @@ public class GooglePlacesClient : IGooglePlacesClient
             name,
             lat,
             lng,
-            category,
-            rawType,
-            interactionHint,
-            address
+            classification.Category,
+            classification.Subcategory,
+            classification.Subcategory,
+            classification.PlaceFunction,
+            classification.IsBossSpecial,
+            classification.InteractionHint,
+            classification.ActionLabel,
+            address,
+            rawTypes
         );
     }
 

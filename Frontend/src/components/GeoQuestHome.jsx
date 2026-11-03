@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   alterarPersonagemJogador,
   atualizarNomeJogador,
+  atualizarVidaJogador,
   desequiparItemJogador,
   equiparItemJogador,
   fetchJogadorAtual,
@@ -54,6 +55,12 @@ export default function GeoQuestHome() {
 
   const handleChangeCharacter = useCallback(async (personagemId) => {
     const updated = await alterarPersonagemJogador(personagemId);
+    setPlayerState(updated);
+    return updated;
+  }, []);
+
+  const handleUpdatePlayerHp = useCallback(async (novaVida, novaEnergia = null) => {
+    const updated = await atualizarVidaJogador(novaVida, novaEnergia);
     setPlayerState(updated);
     return updated;
   }, []);
@@ -174,6 +181,7 @@ export default function GeoQuestHome() {
           character={currentCharacterObj}
           playerState={playerState}
           onRegisterRouteTraversal={handleRegisterRouteTraversal}
+          onUpdatePlayerHp={handleUpdatePlayerHp}
           onExitToMenu={() => setScreen("menu")}
         />
         <PlayerSystemsOverlay
@@ -181,6 +189,7 @@ export default function GeoQuestHome() {
           coords={coords}
           onUpdateName={handleUpdateName}
           onChangeCharacter={handleChangeCharacter}
+          onUpdatePlayerHp={handleUpdatePlayerHp}
           onMoveItem={handleMoveItem}
           onDeleteItem={handleDeleteItem}
           onEquipItem={handleEquipItem}
@@ -265,8 +274,10 @@ export default function GeoQuestHome() {
             zIndex: 3,
           }}
         >
-          JOGADOR: <strong>{playerState.nome}</strong> • {playerState.personagemAtual?.nome || "Explorador #1"} • PODER:{" "}
-          <strong>{playerState.atributos?.nivelDePoder ?? 10}</strong>
+          JOGADOR: <strong>{playerState.nome}</strong> •{" "}
+          {playerState.personagemAtual?.nome || "Explorador #1"} • PODER:{" "}
+          <strong>{playerState.atributos?.nivelDePoder ?? 10}</strong> • MOEDAS:{" "}
+          <strong>{playerState.moedas ?? playerState.atributos?.moedas ?? 0}</strong>
         </div>
       )}
 
@@ -313,7 +324,7 @@ export default function GeoQuestHome() {
         ) : coords ? (
           <>
             {Math.abs(coords.lat).toFixed(5)}° {coords.lat >= 0 ? "N" : "S"}
-            &nbsp;&nbsp;
+            {"  "}
             {Math.abs(coords.lng).toFixed(5)}° {coords.lng >= 0 ? "E" : "W"}
           </>
         ) : (
@@ -515,6 +526,7 @@ export default function GeoQuestHome() {
         coords={coords}
         onUpdateName={handleUpdateName}
         onChangeCharacter={handleChangeCharacter}
+        onUpdatePlayerHp={handleUpdatePlayerHp}
         onMoveItem={handleMoveItem}
         onDeleteItem={handleDeleteItem}
         onEquipItem={handleEquipItem}

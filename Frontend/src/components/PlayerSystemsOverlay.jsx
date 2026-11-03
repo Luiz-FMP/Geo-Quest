@@ -10,6 +10,7 @@ export default function PlayerSystemsOverlay({
   coords,
   onUpdateName,
   onChangeCharacter,
+  onUpdatePlayerHp,
   onMoveItem,
   onDeleteItem,
   onEquipItem,
@@ -68,9 +69,12 @@ export default function PlayerSystemsOverlay({
       )}
 
       {activeMenu === "settings" && (
-        <PlayerSettingsModal onClose={handleCloseMenu} />
+        <PlayerSettingsModal
+          playerState={playerState}
+          onUpdatePlayerHp={onUpdatePlayerHp}
+          onClose={handleCloseMenu}
+        />
       )}
     </>
   );
 }
-

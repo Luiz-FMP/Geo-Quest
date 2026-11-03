@@ -42,6 +42,7 @@ public class PlayerStatsCalculator
 
         double nivelDePoder = CalcularNivelDePoder(vidaFinal, danoFinal, defesaFinal);
         double consumoPorKm = CalcularConsumoEnergiaPorKm(velocidadeFinal);
+        int moedas = Math.Max(0, jogador.Moedas);
 
         return new AtributosDetalhadosDto(
             VidaBase: jogador.VidaBase,
@@ -62,7 +63,8 @@ public class PlayerStatsCalculator
             VelocidadeModificador: modVelocidade,
             VelocidadeFinal: velocidadeFinal,
             NivelDePoder: nivelDePoder,
-            ConsumoEnergiaPorKm: consumoPorKm
+            ConsumoEnergiaPorKm: consumoPorKm,
+            Moedas: moedas
         );
     }
 
@@ -188,6 +190,7 @@ public class PlayerStatsCalculator
             Id: jogador.Id,
             Nome: jogador.Nome,
             PersonagemId: jogador.PersonagemId,
+            Moedas: Math.Max(0, jogador.Moedas),
             PersonagemAtual: personagemDto,
             Atributos: atributos,
             Mochila: mochila,
@@ -225,4 +228,3 @@ public class PlayerStatsCalculator
         );
     }
 }
-

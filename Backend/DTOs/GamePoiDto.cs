@@ -6,9 +6,14 @@ public record GamePoiDto(
     double Latitude,
     double Longitude,
     string Category,
+    string Subcategory,
     string RawType,
+    string PlaceFunction,
+    bool IsBossSpecial,
     string InteractionHint,
-    string? Address
+    string? ActionLabel,
+    string? Address,
+    IReadOnlyList<string>? Types = null
 );
 
 public record CharacterSlotDto(
@@ -17,4 +22,5 @@ public record CharacterSlotDto(
     bool IsAvailable,
     string StatusLabel
 );
+
 

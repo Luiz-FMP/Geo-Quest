@@ -13,6 +13,7 @@ builder.Services.AddDbContext<GeoQuestDbContext>(options =>
 
 builder.Services.AddSingleton<PlaceCategoryMapper>();
 builder.Services.AddSingleton<PlayerStatsCalculator>();
+builder.Services.AddScoped<CombatService>();
 builder.Services.AddHttpClient<IGooglePlacesClient, GooglePlacesClient>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);

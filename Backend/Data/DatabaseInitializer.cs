@@ -22,17 +22,34 @@ public static class DatabaseInitializer
 
         try
         {
-            // Verifica se as novas tabelas/colunas estão presentes no arquivo SQLite existente
+            // Caso o banco já exista da etapa anterior sem a coluna Moedas, adiciona preservando os dados existentes
+            try
+            {
+                _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.Moedas).FirstOrDefaultAsync();
+            }
+            catch
+            {
+                await context.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE Jogadores ADD COLUMN Moedas INTEGER NOT NULL DEFAULT 0;"
+                );
+            }
+
+            // Verifica se as tabelas/colunas estão presentes no arquivo SQLite existente
             _ = await context.ItensDefinicao.AnyAsync();
             _ = await context.ItensInventario.AnyAsync();
             _ = await context.BuffsJogador.AnyAsync();
             _ = await context.EstatisticasJogador.AnyAsync();
             _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.VidaBase).FirstOrDefaultAsync();
+            _ = await context.Jogadores.OrderBy(j => j.Id).Select(j => j.Moedas).FirstOrDefaultAsync();
             _ = await context.Personagens.OrderBy(p => p.Id).Select(p => p.PlaceholderKey).FirstOrDefaultAsync();
+            _ = await context.Personagens.OrderBy(p => p.Id).Select(p => p.Velocidade).FirstOrDefaultAsync();
+            _ = await context.Personagens.OrderBy(p => p.Id).Select(p => p.Energia).FirstOrDefaultAsync();
+            _ = await context.Inimigos.OrderBy(i => i.Id).Select(i => i.Velocidade).FirstOrDefaultAsync();
+            _ = await context.Bosses.OrderBy(b => b.Id).Select(b => b.Velocidade).FirstOrDefaultAsync();
         }
         catch
         {
-            // Caso exista um banco antigo de etapa anterior sem as tabelas do sistema de jogador, recria o schema
+            // Caso exista um banco antigo incompatível, recria o schema
             await context.Database.EnsureDeletedAsync();
             await context.Database.EnsureCreatedAsync();
         }
@@ -52,6 +69,8 @@ public static class DatabaseInitializer
                     Vida = 50,
                     Ataque = 10,
                     Defesa = 0,
+                    Velocidade = 12,
+                    Energia = 100,
                     Vantagem = "Equilibrado",
                     Disponivel = true,
                     PlaceholderKey = "char_1"
@@ -64,6 +83,8 @@ public static class DatabaseInitializer
                     Vida = 50,
                     Ataque = 10,
                     Defesa = 0,
+                    Velocidade = 14,
+                    Energia = 100,
                     Vantagem = "Reconhecimento",
                     Disponivel = true,
                     PlaceholderKey = "char_2"
@@ -76,6 +97,8 @@ public static class DatabaseInitializer
                     Vida = 50,
                     Ataque = 10,
                     Defesa = 0,
+                    Velocidade = 10,
+                    Energia = 100,
                     Vantagem = "Resistência",
                     Disponivel = true,
                     PlaceholderKey = "char_3"
@@ -116,6 +139,8 @@ public static class DatabaseInitializer
                         Vida = 50,
                         Ataque = 10,
                         Defesa = 0,
+                        Velocidade = 14,
+                        Energia = 100,
                         Vantagem = "Reconhecimento",
                         Disponivel = true,
                         PlaceholderKey = "char_2"
@@ -132,6 +157,8 @@ public static class DatabaseInitializer
                         Vida = 50,
                         Ataque = 10,
                         Defesa = 0,
+                        Velocidade = 10,
+                        Energia = 100,
                         Vantagem = "Resistência",
                         Disponivel = true,
                         PlaceholderKey = "char_3"
@@ -173,6 +200,69 @@ public static class DatabaseInitializer
             await context.SaveChangesAsync();
         }
 
+        // Garante inimigos base para Combate Aleatório e Combate de Arena
+        if (!await context.Inimigos.AnyAsync())
+        {
+            context.Inimigos.AddRange(
+                new Inimigo
+                {
+                    Nome = "Batedor Urbano",
+                    Descricao = "Oponente encontrado durante o deslocamento pelas rotas da cidade.",
+                    Vida = 30,
+                    Ataque = 6,
+                    Defesa = 1,
+                    Velocidade = 10
+                },
+                new Inimigo
+                {
+                    Nome = "Desafiante da Arena",
+                    Descricao = "Combatente preparado para disputas em locais de entretenimento e recreação.",
+                    Vida = 40,
+                    Ataque = 8,
+                    Defesa = 2,
+                    Velocidade = 12
+                },
+                new Inimigo
+                {
+                    Nome = "Vigia das Ruas",
+                    Descricao = "Inimigo ágil que patrulha trajetos movimentados.",
+                    Vida = 35,
+                    Ataque = 7,
+                    Defesa = 1,
+                    Velocidade = 14
+                }
+            );
+            await context.SaveChangesAsync();
+        }
+
+        // Garante cidade e Boss base para Combate de Boss em shopping_mall
+        if (!await context.Cidades.AnyAsync())
+        {
+            context.Cidades.Add(new Cidade
+            {
+                Id = 1,
+                Nome = "Curitiba",
+                Estado = "PR",
+                Pais = "Brasil"
+            });
+            await context.SaveChangesAsync();
+        }
+
+        if (!await context.Bosses.AnyAsync())
+        {
+            var cidadePadrao = await context.Cidades.OrderBy(c => c.Id).FirstAsync();
+            context.Bosses.Add(new Boss
+            {
+                Nome = "Guardião do Shopping",
+                Vida = 60,
+                Ataque = 9,
+                Defesa = 2,
+                Velocidade = 9,
+                CidadeId = cidadePadrao.Id
+            });
+            await context.SaveChangesAsync();
+        }
+
         // Garante que o jogador local exista
         var jogadorLocal = await context.Jogadores
             .Include(j => j.Estatisticas)
@@ -193,7 +283,8 @@ public static class DatabaseInitializer
                 EnergiaAtual = 100.0,
                 DanoBase = 10,
                 DefesaBase = 0,
-                VelocidadeBase = 0
+                VelocidadeBase = 0,
+                Moedas = 0
             };
 
             context.Jogadores.Add(jogadorLocal);
@@ -242,4 +333,3 @@ public static class DatabaseInitializer
         }
     }
 }
-
