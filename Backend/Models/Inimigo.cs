@@ -13,4 +13,6 @@ public class Inimigo
     public int Ataque { get; set; }
 
     public int Defesa { get; set; }
+
+    public int Velocidade { get; set; }
 }

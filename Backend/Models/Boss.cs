@@ -12,6 +12,8 @@ public class Boss
 
     public int Defesa { get; set; }
 
+    public int Velocidade { get; set; }
+
     public int CidadeId { get; set; }
 
     public Cidade? Cidade { get; set; }

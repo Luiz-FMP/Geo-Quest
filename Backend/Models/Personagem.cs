@@ -10,9 +10,13 @@ public class Personagem
 
     public int Vida { get; set; }
 
+    public int Energia { get; set; }
+
     public int Ataque { get; set; }
 
     public int Defesa { get; set; }
+
+    public int Velocidade { get; set; }
 
     public string Vantagem { get; set; } = string.Empty;
 
