@@ -28,3 +28,11 @@ public class SessaoCombateDto
     public bool PermiteFuga { get; set; }
     public List<List<CombatenteInimigoDto>> Rondas { get; set; } = new();
 }
+
+public class ResultadoRecompensaDto
+{
+    public bool Vitoria { get; set; }
+    public int MoedasGanhas { get; set; }
+    public bool GanhouItem { get; set; }
+    public string? ItemNome { get; set; }
+}

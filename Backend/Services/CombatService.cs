@@ -123,4 +123,64 @@ public class CombatService
         }
         return grupo;
     }
+
+    public async Task<ResultadoRecompensaDto> FinalizarCombateAsync(int jogadorId, string tipoCombate, bool vitoria, List<CombatenteInimigoDto> todosInimigosDerrotados)
+    {
+        if (!vitoria)
+        {
+            return new ResultadoRecompensaDto { Vitoria = false };
+        }
+
+        int totalMoedas = 0;
+        foreach (var ini in todosInimigosDerrotados)
+        {
+            if (ini.Tier == "Boss")
+            {
+                totalMoedas += _rng.Next(60, 81); // 60 a 80 moedas para Bosses
+            }
+            else if (ini.Tier == "MiniBoss")
+            {
+                totalMoedas += _rng.Next(20, 31); // 20 a 30 moedas para Mini Bosses
+            }
+            else
+            {
+                // Inimigos normais (com bônus se for em Arena ou grupo)
+                int baseNormal = 5;
+                int bonusArena = tipoCombate == "Arena" ? 3 : 0; 
+                totalMoedas += (baseNormal + bonusArena);
+            }
+        }
+
+        // Drop de Item Aleatório: Certeza se for Arena (tipoCombate == "Arena"), 
+        // caso contrário, 40% de chance para Emboscada/Boss
+        bool ganhaItemCerteza = tipoCombate == "Arena";
+        bool ganhouItem = ganhaItemCerteza || (_rng.NextDouble() <= 0.40);
+
+        string? itemDropadoNome = null;
+        if (ganhouItem)
+        {
+            var itensPool = new[] { "Poção de Vida Menor", "Cristal Energético", "Fragmento de Mapa", "Elixir de Velocidade" };
+            itemDropadoNome = itensPool[_rng.Next(itensPool.Length)];
+        }
+
+        // Atualiza as moedas do Jogador no Banco de Dados
+        var jogador = await _context.Set<Jogador>().Include(j => j.ItensInventario).FirstOrDefaultAsync(j => j.Id == jogadorId);
+        if (jogador != null)
+        {
+            jogador.Moedas += totalMoedas;
+            
+            // Aqui futuramente você adicionará o item ganho na tabela ItemInventario.cs
+            // Ex: if (ganhouItem) { _context.ItemInventarios.Add(new ItemInventario { JogadorId = jogador.Id, ... }); }
+
+            await _context.SaveChangesAsync();
+        }
+
+        return new ResultadoRecompensaDto
+        {
+            Vitoria = true,
+            MoedasGanhas = totalMoedas,
+            GanhouItem = ganhouItem,
+            ItemNome = itemDropadoNome
+        };
+    }
 }
