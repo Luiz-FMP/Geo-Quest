@@ -1,5 +1,4 @@
 import React from "react";
-import CharacterAnimatedSprite from "./CharacterAnimatedSprite";
 
 const CORES_PERSONAGEM = {
   Miguel: { cor: "#38BDF8", bg: "#112233", codigo: "EXP-01" },
@@ -77,8 +76,8 @@ export default function CombatArena({
           transform: animacaoJogador
             ? "translateX(55px) scale(1.05)"
             : danoRecebidoAnim
-            ? "translateX(-12px)"
-            : "translateX(0)",
+              ? "translateX(-12px)"
+              : "translateX(0)",
           transition: "transform 0.2s cubic-bezier(0.22, 1, 0.36, 1)",
           textAlign: "center",
           minWidth: 160,
@@ -230,14 +229,14 @@ export default function CombatArena({
           const corTema = isBoss
             ? "#F87171"
             : isMiniBoss
-            ? "#FBBF24"
-            : "#A855F7";
+              ? "#FBBF24"
+              : "#A855F7";
 
           const bgTema = isBoss
             ? "#2D1215"
             : isMiniBoss
-            ? "#2B2111"
-            : "#20142B";
+              ? "#2B2111"
+              : "#20142B";
 
           const tamanhoCaixa = isBoss ? 132 : isMiniBoss ? 108 : 90;
           const pctVida = Math.max(0, Math.min(100, (ini.vidaAtual / ini.vidaMaxima) * 100));

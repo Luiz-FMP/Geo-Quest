@@ -1,75 +1,34 @@
-# Geo Quest — Codex Project Instructions
+# Geo Quest — Project Instructions
 
 ## Mission
-Geo Quest is a location-based exploration game. Real-world points of interest (POIs) become interactive game locations. Players move through a city, complete missions tied to real places, progress toward a city boss, and record conquered cities.
+Geo Quest is a location-based exploration game. Real-world points of interest (POIs) from the Google Places API become interactive game locations. Players move through a city, interact with categorized Places, battle enemies and bosses, upgrade attributes, and progress across real-world locations.
 
-## Current work scope
-- Codex work in this repository should focus on the backend unless the user explicitly requests otherwise.
-- The backend lives under `Backend/` and is written in C# with ASP.NET Core on .NET 10.
-- The frontend is being developed separately. Do not create, restructure, or make assumptions about frontend code as part of backend tasks.
-- Do not treat the absence of frontend code in this repository as a backend problem.
-- Inspect the repository before every task and distinguish current code from planned features.
+## Current Repository Scope
+- **`Backend/`**: Written in C# with ASP.NET Core Web API on `.NET 10` (`GeoQuest.Api.csproj`) and SQLite (`Entity Framework Core`).
+- **`Frontend/`**: Written in React 19 + Vite (`@vis.gl/react-google-maps`).
+- **`Documentação/` & `docs/`**: Project documentation, directory structure reference (`Documentação/ESTRUTURA_DO_PROJETO.md`), setup guide (`Documentação/README.md`), and project context (`docs/PROJECT_CONTEXT.md`).
+- Inspect the repository before every task and reuse existing components, controllers, DTOs, and services instead of creating duplicate implementations.
 
-## Product scope
-Keep backend implementation focused on supporting the MVP:
-1. Location/coordinate input needed for map-driven gameplay.
-2. Real-world POI lookup and normalization into game POIs.
-3. Character data and simple distinct attributes.
-4. Mission selection tied to a real location.
-5. Mission completion and progression.
-6. City boss unlock/completion rules.
-7. History of conquered cities.
+## Core Architecture Rules
+- **Backend**:
+  - Language: C# on ASP.NET Core (`.NET 10`).
+  - Persist important player state changes in SQLite (`AppDbContext` / `geoquest.db`).
+  - Keep API contracts explicit with request/response DTOs (`DTOs/PlayerStateDtos.cs`, `DTOs/CombatDtos.cs`).
+  - Keep Google Maps/Places/Directions models behind integration boundaries (`Integrations/GooglePlacesClient.cs`, `Integrations/GoogleDirectionsClient.cs`, `Services/PlaceCategoryMapper.cs`).
+- **Frontend**:
+  - React 19 + Vite in `Frontend/src/`.
+  - Keep Place category/subcategory classification synchronized with the backend (`src/utils/placeCategories.js` and `Backend/Services/PlaceCategoryMapper.cs`).
+  - Ensure the backend validates and persists state changes while keeping local fallback state consistent in `src/services/playerApi.js`.
 
-Avoid expanding into unrelated features such as chat, social feeds, marketplaces, complex combat systems, large inventory systems, or other features not required by the MVP unless the user explicitly requests them.
-
-## Backend architecture rules
-- Language: C#.
-- Framework: ASP.NET Core on .NET 10.
-- The backend should expose HTTP APIs for the client rather than owning frontend UI concerns.
-- Keep API contracts explicit with request/response DTOs when needed.
-- Keep controllers thin when business rules become non-trivial.
-- Put reusable game/domain rules into services or domain classes instead of accumulating logic in controllers.
-- Keep provider-specific Google/POI models behind an integration boundary so game logic does not depend directly on external response shapes.
-- Prefer dependency injection through ASP.NET Core's built-in container.
-- Introduce interfaces only when they provide a real test seam or multiple implementations are expected.
-- Do not replace the chosen stack or introduce a new framework without explicit approval.
-- Prefer focused vertical slices over speculative architecture.
-- Do not add persistence/database infrastructure until a feature requires it or the user approves it.
-
-## Maps, POIs, and location
-- Treat Google Maps/Places and location inputs as external or untrusted boundaries with failure states.
+## Maps, POIs, and Location Rules
 - Never commit API keys, tokens, credentials, or secrets.
-- Read secrets from configuration/environment variables and document only safe variable names/placeholders.
+- Read secrets from configuration/environment variables (`GOOGLE_MAPS_API_KEY`, `VITE_GOOGLE_MAPS_API_KEY`) and document only safe placeholder names.
 - Handle unavailable coordinates, invalid coordinates, empty POI results, timeouts, quota failures, and upstream API failures explicitly.
-- Avoid persisting precise user location unless the feature truly requires it.
-- Do not log exact coordinates by default.
-- Keep coordinate/POI lookup separate from mission/progression rules where practical so domain behavior can be tested without live provider calls.
+- Never invent coordinates when geolocation fails; respect the priority order: (1) Debug Coordinates when enabled in Settings, (2) Browser Geolocation API.
+- For **Transportation** Places, use only the 24 official Google Places transportation subcategories and search exclusively for destinations of the exact same subcategory using progressive radii (`5km -> 15km -> 30km -> 50km`).
 
-## API behavior
-- Validate input at API boundaries.
-- Return appropriate HTTP status codes and useful error responses without exposing stack traces, secrets, or internal configuration.
-- Prefer cancellation-aware asynchronous methods for network/database I/O.
-- Preserve nullable reference type correctness.
-
-## Development workflow
-Before editing:
-1. Inspect the relevant backend files and current branch state.
-2. Identify the smallest backend behavior required by the task.
-3. State assumptions only when necessary; do not invent missing requirements.
-4. Prefer focused edits over broad refactors.
-
+## Verification Workflow
 After editing:
-1. Run `dotnet build Backend/GeoQuest.Api.csproj` when the environment supports it.
-2. Run targeted tests when tests exist.
-3. Report what was validated and what could not be validated.
-4. Call out configuration/API-key requirements without exposing secrets.
-5. Keep unrelated files untouched.
-
-## Git and review
-- Do not push directly to `main` unless the user explicitly asks.
-- Prefer a focused branch and pull request for meaningful changes.
-- Do not rewrite unrelated history.
-- Review first for correctness, secrets, location/privacy risks, regressions, and missing validation; style-only concerns come later.
-
-## Project context
-For product goals and roadmap context, read `docs/PROJECT_CONTEXT.md` when planning a feature that touches scope or milestones.
+1. Run `dotnet build Backend/GeoQuest.Api.csproj`.
+2. Run `npm --prefix Frontend run lint` and `npm --prefix Frontend run build`.
+3. Report what was validated and call out any configuration/API-key requirements without exposing secrets.

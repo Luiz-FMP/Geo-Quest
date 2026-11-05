@@ -8,7 +8,8 @@ namespace GeoQuest.Api.Integrations;
 
 public class GooglePlacesClient : IGooglePlacesClient
 {
-    private static readonly int[] ProgressiveTransportRadiiMeters = [1200, 5000, 15000, 30000, 50000];
+    private static readonly int[] ProgressiveTransportRadiiMeters = [5000, 15000, 30000, 50000];
+    public const int AdequateTransportDestinationsCount = 5;
     public const int MaxTransportDestinations = 10;
     public const int MaxPlacesNewQueryCount = 20;
     public const int MaxAllowedRadiusMeters = 50000;
@@ -142,7 +143,7 @@ public class GooglePlacesClient : IGooglePlacesClient
         CancellationToken cancellationToken = default)
     {
         var normalizedType = (transportType ?? string.Empty).Trim().ToLowerInvariant();
-        if (normalizedType is not ("airport" or "bus_station"))
+        if (!PlaceCategoryMapper.IsAllowedTransportationSubcategory(normalizedType))
         {
             return new TransportDestinationsLookupResult(
                 false,
@@ -150,7 +151,7 @@ public class GooglePlacesClient : IGooglePlacesClient
                 0,
                 Array.Empty<TransportDestinationDto>(),
                 "INVALID_TRANSPORT_TYPE",
-                "Tipo de transporte inválido. Apenas 'airport' e 'bus_station' são permitidos."
+                $"Subcategoria de transporte inválida ('{normalizedType}'). Utilize uma das 24 subcategorias oficiais de Transportation."
             );
         }
 
@@ -237,7 +238,7 @@ public class GooglePlacesClient : IGooglePlacesClient
                     );
                 }
 
-                if (collectedById.Count >= MaxTransportDestinations)
+                if (collectedById.Count >= AdequateTransportDestinationsCount)
                 {
                     break;
                 }
@@ -308,13 +309,9 @@ public class GooglePlacesClient : IGooglePlacesClient
             CancellationToken cancellationToken)
     {
         const string url = "https://places.googleapis.com/v1/places:searchNearby";
-        var includedTypes = string.Equals(transportType, "airport", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "airport", "international_airport", "airstrip" }
-            : new[] { "bus_station", "bus_stop" };
-
         var payload = new
         {
-            includedTypes,
+            includedTypes = new[] { transportType },
             maxResultCount = MaxPlacesNewQueryCount,
             rankPreference = "DISTANCE",
             languageCode = "pt-BR",

@@ -21,6 +21,58 @@ export const RANDOM_ENCOUNTER_CONFIG = {
   minDistanceKm: 0.03,
 };
 
+/**
+ * Calcula a ordem de iniciativa do combate baseada no atributo Velocidade (Item 3).
+ * Regras:
+ * 1. Maior velocidade age primeiro (ordem decrescente de velocidade).
+ * 2. Em caso de empate de velocidade:
+ *    - O jogador age antes do inimigo;
+ *    - Entre inimigos com a mesma velocidade, preserva a ordem original da ronda e depois o identificador/nome.
+ */
+export function calcularOrdemIniciativa(personagem, inimigosRonda = []) {
+  const participantes = [];
+
+  if (personagem) {
+    participantes.push({
+      tipo: "jogador",
+      id: "jogador",
+      nome: personagem.nome || "Jogador",
+      velocidade: Number(personagem.velocidade ?? 0),
+      ordemOriginal: 0,
+      inimigoRef: null,
+    });
+  }
+
+  (Array.isArray(inimigosRonda) ? inimigosRonda : []).forEach((ini, idx) => {
+    if (!ini || (typeof ini.vidaAtual === "number" && ini.vidaAtual <= 0)) {
+      return;
+    }
+    participantes.push({
+      tipo: "inimigo",
+      id: String(ini.idInstancia || `ini_${idx}`),
+      nome: ini.nome || `Inimigo #${idx + 1}`,
+      velocidade: Number(ini.velocidade ?? 0),
+      ordemOriginal: idx + 1,
+      inimigoRef: ini,
+    });
+  });
+
+  participantes.sort((a, b) => {
+    if (b.velocidade !== a.velocidade) {
+      return b.velocidade - a.velocidade;
+    }
+    if (a.tipo !== b.tipo) {
+      return a.tipo === "jogador" ? -1 : 1;
+    }
+    if (a.ordemOriginal !== b.ordemOriginal) {
+      return a.ordemOriginal - b.ordemOriginal;
+    }
+    return a.id.localeCompare(b.id);
+  });
+
+  return participantes;
+}
+
 export function calculateRandomEncounterProbability(
   distanceKm,
   config = RANDOM_ENCOUNTER_CONFIG,

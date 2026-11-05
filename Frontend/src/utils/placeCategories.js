@@ -46,6 +46,83 @@ export const SPECIFIC_NATURAL_SUBCATEGORIES = [
 ];
 
 /**
+ * Seção 6: Lista determinística e ordenada das 24 subcategorias oficiais de Transportation (Google Places API).
+ */
+export const ORDERED_TRANSPORTATION_SUBCATEGORIES = [
+  "international_airport",
+  "airport",
+  "airstrip",
+  "heliport",
+  "ferry_terminal",
+  "ferry_service",
+  "train_station",
+  "subway_station",
+  "light_rail_station",
+  "tram_stop",
+  "bus_station",
+  "bus_stop",
+  "transit_depot",
+  "transit_station",
+  "transit_stop",
+  "park_and_ride",
+  "taxi_stand",
+  "taxi_service",
+  "train_ticket_office",
+  "bike_sharing_station",
+  "truck_stop",
+  "toll_station",
+  "bridge",
+  "transportation_service",
+];
+
+export const ALLOWED_TRANSPORTATION_SUBCATEGORIES = new Set(
+  ORDERED_TRANSPORTATION_SUBCATEGORIES,
+);
+
+export function isAllowedTransportationSubcategory(subcategory) {
+  if (typeof subcategory !== "string") return false;
+  return ALLOWED_TRANSPORTATION_SUBCATEGORIES.has(subcategory.trim().toLowerCase());
+}
+
+/**
+ * Identifica a subcategoria específica de um Place de Transportation considerando primaryType e types,
+ * sem escolher aleatoriamente e ignorando tipos genéricos como point_of_interest ou establishment.
+ */
+export function resolveTransportationSubcategory(
+  primaryType = null,
+  types = [],
+  fallbackSubcategory = null,
+) {
+  const normPrimary =
+    typeof primaryType === "string" ? primaryType.trim().toLowerCase() : "";
+  if (normPrimary && ALLOWED_TRANSPORTATION_SUBCATEGORIES.has(normPrimary)) {
+    return normPrimary;
+  }
+
+  const normTypes = Array.isArray(types)
+    ? types
+        .filter((t) => typeof t === "string" && t.trim().length > 0)
+        .map((t) => t.trim().toLowerCase())
+    : [];
+
+  for (const sub of ORDERED_TRANSPORTATION_SUBCATEGORIES) {
+    if (normTypes.includes(sub)) {
+      return sub;
+    }
+  }
+
+  const normFallback =
+    typeof fallbackSubcategory === "string"
+      ? fallbackSubcategory.trim().toLowerCase()
+      : "";
+  if (normFallback && ALLOWED_TRANSPORTATION_SUBCATEGORIES.has(normFallback)) {
+    return normFallback;
+  }
+
+  return null;
+}
+
+/**
  * Seção 4.1: Nomes traduzidos e simplificados obrigatórios das 8 subcategorias de Natural Features.
  */
 export const NATURAL_FEATURE_SUBCATEGORY_NAMES = {
@@ -88,22 +165,31 @@ export const SUBCATEGORY_TRANSLATIONS = {
   ...NATURAL_FEATURE_SUBCATEGORY_NAMES,
   natural_feature: "Bosque",
 
-  // Transportation (Seção 5)
+  // Transportation (24 subcategorias oficiais da Google Places API)
   airport: "Aeroporto",
-  international_airport: "Aeroporto",
-  airstrip: "Aeroporto",
+  airstrip: "Pista de pouso",
+  bike_sharing_station: "Estação de bicicletas",
+  bridge: "Ponte",
   bus_station: "Estação de ônibus",
-  bus_stop: "Estação de ônibus",
+  bus_stop: "Ponto de ônibus",
+  ferry_service: "Serviço de balsa",
   ferry_terminal: "Terminal de balsas",
-  heliport: "Aeroporto",
-  light_rail_station: "Estação de ônibus",
-  park_and_ride: "Estação de ônibus",
-  subway_station: "Estação de ônibus",
-  taxi_stand: "Estação de ônibus",
-  train_station: "Estação de ônibus",
-  transit_depot: "Estação de ônibus",
-  transit_station: "Estação de ônibus",
-  truck_stop: "Estação de ônibus",
+  heliport: "Heliporto",
+  international_airport: "Aeroporto internacional",
+  light_rail_station: "Estação de VLT",
+  park_and_ride: "Estacionamento integrado",
+  subway_station: "Estação de metrô",
+  taxi_service: "Serviço de táxi",
+  taxi_stand: "Ponto de táxi",
+  toll_station: "Praça de pedágio",
+  train_station: "Estação de trem",
+  train_ticket_office: "Bilheteria ferroviária",
+  tram_stop: "Parada de bonde",
+  transit_depot: "Garagem de transporte",
+  transit_station: "Estação de transporte",
+  transit_stop: "Parada de transporte",
+  transportation_service: "Serviço de transporte",
+  truck_stop: "Parada de caminhões",
 
   // Culture (Seção 6)
   art_gallery: "Galeria de arte",
@@ -411,12 +497,7 @@ export const ORDERED_CATEGORY_RULES = [
     placeFunction: PLACE_FUNCTIONS.TRANSPORT,
     interactionHint: "Ponto de transporte que conecta terminais do mesmo tipo na região.",
     actionLabel: "VER LOCALIZAÇÕES PRÓXIMAS",
-    subcategories: [
-      "airport", "airstrip", "bus_station", "bus_stop", "ferry_terminal",
-      "heliport", "international_airport", "light_rail_station", "park_and_ride",
-      "subway_station", "taxi_stand", "train_station", "transit_depot",
-      "transit_station", "truck_stop",
-    ],
+    subcategories: ORDERED_TRANSPORTATION_SUBCATEGORIES,
   },
   {
     category: ALLOWED_CATEGORIES.SERVICES,
@@ -464,17 +545,15 @@ function resolveSpecificSubcategory(rule, candidateSubcategory, normalizedTypes 
 
   if (rule.category === ALLOWED_CATEGORIES.TRANSPORTATION) {
     if (
-      candidateSubcategory === "airport" ||
-      candidateSubcategory === "international_airport" ||
-      candidateSubcategory === "airstrip" ||
-      candidateSubcategory === "heliport" ||
-      normalizedTypes.includes("airport") ||
-      normalizedTypes.includes("international_airport") ||
-      normalizedTypes.includes("airstrip")
+      candidateSubcategory &&
+      ALLOWED_TRANSPORTATION_SUBCATEGORIES.has(candidateSubcategory)
     ) {
-      return "airport";
+      return candidateSubcategory;
     }
-    return "bus_station";
+    const matched = ORDERED_TRANSPORTATION_SUBCATEGORIES.find((s) =>
+      normalizedTypes.includes(s),
+    );
+    return matched || "bus_station";
   }
 
   return candidateSubcategory;
@@ -567,12 +646,17 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
 
   // 4. Caso contrário, buscar nos types válidos seguindo a ordem de prioridade centralizada
   for (const rule of ORDERED_CATEGORY_RULES) {
-    const matched = normalizedTypes.find(
-      (t) =>
-        t !== "store" &&
-        t !== "natural_feature" &&
-        rule.subcategories.includes(t),
-    );
+    const matched =
+      rule.category === ALLOWED_CATEGORIES.TRANSPORTATION
+        ? ORDERED_TRANSPORTATION_SUBCATEGORIES.find((s) =>
+            normalizedTypes.includes(s),
+          )
+        : normalizedTypes.find(
+            (t) =>
+              t !== "store" &&
+              t !== "natural_feature" &&
+              rule.subcategories.includes(t),
+          );
     if (matched) {
       return buildClassification(rule, matched, normalizedTypes);
     }
@@ -722,6 +806,8 @@ export function normalizePlaceRecord(rawPlace, index = 0) {
       categoryInfo.category,
     ),
     rawType: categoryInfo.rawType,
+    primaryType: primaryType ? String(primaryType).trim().toLowerCase() : categoryInfo.subcategory,
+    types: rawTypes,
     placeFunction: categoryInfo.placeFunction,
     isBossSpecial: categoryInfo.isBossSpecial,
     color: categoryInfo.color,

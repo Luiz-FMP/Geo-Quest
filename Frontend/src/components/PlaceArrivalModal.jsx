@@ -179,6 +179,38 @@ export default function PlaceArrivalModal({
   const isPlaceCompleted = Boolean(permanentState?.concluido);
   const isFreeHealUsed = Boolean(permanentState?.curaGratuitaUtilizada);
 
+  // Em Sports, recupera qual melhoria foi escolhida e persistida no SQLite/estado permanente
+  let persistedSportsUpgradeLabel = null;
+  if (isSports) {
+    if (permanentState?.estoqueJson) {
+      try {
+        const parsed = JSON.parse(permanentState.estoqueJson);
+        if (parsed?.rotulo) {
+          persistedSportsUpgradeLabel = parsed.rotulo;
+        } else if (parsed?.melhoria) {
+          const foundOpt = SPORTS_UPGRADE_OPTIONS.find(
+            (o) => o.key === String(parsed.melhoria).toLowerCase(),
+          );
+          if (foundOpt) {
+            persistedSportsUpgradeLabel = `${foundOpt.label} (${foundOpt.detail})`;
+          }
+        }
+      } catch {
+        // Ignora caso estoqueJson não seja JSON estruturado
+      }
+    }
+    if (!persistedSportsUpgradeLabel && sportsTrainedOption) {
+      const foundOpt = SPORTS_UPGRADE_OPTIONS.find(
+        (o) => o.key === sportsTrainedOption,
+      );
+      if (foundOpt) {
+        persistedSportsUpgradeLabel = `${foundOpt.label} (${foundOpt.detail})`;
+      }
+    }
+  }
+  const isSportsCompleted =
+    isSports && (isPlaceCompleted || sportsTrainedOption !== null);
+
   const vidaAtual = playerState?.atributos?.vidaAtual ?? 50;
   const vidaFinal = Math.max(1, playerState?.atributos?.vidaFinal ?? 50);
   const energiaAtual = Number(
@@ -291,7 +323,7 @@ export default function PlaceArrivalModal({
     try {
       await onHomeRest();
       setActionFeedback(
-        "Descanso gratuito realizado! +50% da Vida total e 100% da Energia foram recuperadas.",
+        "Descanso realizado na Home! Sua vida foi garantida em pelo menos 50% da Vida máxima.",
       );
     } catch (err) {
       setActionError(err?.message || "Não foi possível descansar no Home.");
@@ -351,12 +383,12 @@ export default function PlaceArrivalModal({
     setCultureBuffAcquired(true);
   }
 
-  // Seção 7: Sports — Treinar 1 atributo permanente por interação com o Place
+  // Seção 7: Sports — Treinar 1 atributo permanente uma única vez por Place
   async function handleSelectSportsUpgrade(optionKey) {
     if (
       !hasArrived ||
       isBusy ||
-      sportsTrainedOption !== null ||
+      isSportsCompleted ||
       !onTrainSports
     ) {
       return;
@@ -575,24 +607,29 @@ export default function PlaceArrivalModal({
             </div>
           )}
 
-          {(isArena || isBossSpecial) && isPlaceCompleted && (
-            <div
-              data-testid="place-menu-completed-badge"
-              style={{
-                display: "inline-block",
-                padding: "5px 10px",
-                borderRadius: 6,
-                background: "#14532D",
-                border: "1px solid #22C55E",
-                fontFamily: "'IBM Plex Mono', monospace",
-                fontSize: 11,
-                fontWeight: 700,
-                color: "#86EFAC",
-              }}
-            >
-              {isBossSpecial ? "Boss Derrotado (Concluído)" : "Arena Concluída"}
-            </div>
-          )}
+          {(isArena || isBossSpecial || isSports) &&
+            (isPlaceCompleted || isSportsCompleted) && (
+              <div
+                data-testid="place-menu-completed-badge"
+                style={{
+                  display: "inline-block",
+                  padding: "5px 10px",
+                  borderRadius: 6,
+                  background: "#14532D",
+                  border: "1px solid #22C55E",
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#86EFAC",
+                }}
+              >
+                {isBossSpecial
+                  ? "Boss Derrotado (Concluído)"
+                  : isSports
+                    ? "Aprimoramento Concluído"
+                    : "Arena Concluída"}
+              </div>
+            )}
 
           {routeSummary && !hasArrived && (
             <div
@@ -895,7 +932,9 @@ export default function PlaceArrivalModal({
               </strong>
             </div>
             <div style={{ color: "#9CAEA0" }}>
-              Escolha apenas 1 aprimoramento permanente por visita a este local.
+              {isSportsCompleted
+                ? `Melhoria permanente já adquirida neste local${persistedSportsUpgradeLabel ? `: ${persistedSportsUpgradeLabel}` : "."}`
+                : "Cada local de Sports permite escolher apenas 1 aprimoramento permanente uma única vez."}
             </div>
           </div>
         )}
@@ -1005,7 +1044,9 @@ export default function PlaceArrivalModal({
             </div>
             <div>
               Recuperação:{" "}
-              <strong>+50% da Vida total e 100% da Energia (Grátis)</strong>
+              <strong>
+                Garante pelo menos 50% da Vida máxima ({Math.round(vidaFinal * 0.5)}/{vidaFinal}) — Grátis
+              </strong>
             </div>
           </div>
         )}
@@ -1327,69 +1368,93 @@ export default function PlaceArrivalModal({
               {cultureBuffAcquired ? "BUFF RECEBIDO (WIP)" : "RECEBER BUFF"}
             </button>
           ) : isSports ? (
-            /* Seção 7.1 e 7.2: Sports — 4 opções de aprimoramento permanente (apenas 1 escolha por interação) */
-            <div
-              data-testid="sports-upgrade-options-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 8,
-              }}
-            >
-              {SPORTS_UPGRADE_OPTIONS.map((opt) => {
-                const isSelectedOption = sportsTrainedOption === opt.key;
-                const canSelect =
-                  hasArrived && !isBusy && sportsTrainedOption === null;
+            /* Item 5: Sports — Aprimoramento uma única vez por Place. Se já concluído, não exibe as opções novamente */
+            isSportsCompleted ? (
+              <div
+                data-testid="sports-completed-panel"
+                style={{
+                  padding: "12px 14px",
+                  background: "rgba(20, 83, 45, 0.35)",
+                  border: "1px solid #22C55E",
+                  borderRadius: 8,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12,
+                  color: "#86EFAC",
+                  textAlign: "center",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                }}
+              >
+                <strong style={{ fontSize: 13 }}>
+                  MELHORIA PERMANENTE JÁ ADQUIRIDA NESTE LOCAL
+                </strong>
+                <span style={{ color: "#D1FAE5", fontSize: 11 }}>
+                  {persistedSportsUpgradeLabel
+                    ? `Aprimoramento registrado: ${persistedSportsUpgradeLabel}`
+                    : "Você já realizou o treinamento único disponível neste estabelecimento esportivo."}
+                </span>
+              </div>
+            ) : (
+              <div
+                data-testid="sports-upgrade-options-grid"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                }}
+              >
+                {SPORTS_UPGRADE_OPTIONS.map((opt) => {
+                  const canSelect = hasArrived && !isBusy;
 
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    data-testid={`sports-upgrade-${opt.key}`}
-                    disabled={!canSelect}
-                    onClick={() => handleSelectSportsUpgrade(opt.key)}
-                    style={
-                      canSelect
-                        ? {
-                            padding: "10px 10px",
-                            background: opt.accent,
-                            border: `1px solid ${opt.border}`,
-                            borderRadius: 6,
-                            color: "#FFFFFF",
-                            fontFamily: "'IBM Plex Mono', monospace",
-                            fontWeight: 700,
-                            fontSize: 12,
-                            cursor: "pointer",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: 2,
-                          }
-                        : {
-                            ...DISABLED_GRAY_BUTTON_STYLE,
-                            padding: "10px 10px",
-                            fontSize: 12,
-                            border: isSelectedOption
-                              ? "2px solid #22C55E"
-                              : "1px solid #3E4641",
-                            color: isSelectedOption ? "#86EFAC" : "#7B857E",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: 2,
-                          }
-                    }
-                  >
-                    <span>{opt.label}</span>
-                    <span style={{ fontSize: 10, opacity: 0.9 }}>
-                      ({opt.detail})
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      data-testid={`sports-upgrade-${opt.key}`}
+                      disabled={!canSelect}
+                      onClick={() => handleSelectSportsUpgrade(opt.key)}
+                      style={
+                        canSelect
+                          ? {
+                              padding: "10px 10px",
+                              background: opt.accent,
+                              border: `1px solid ${opt.border}`,
+                              borderRadius: 6,
+                              color: "#FFFFFF",
+                              fontFamily: "'IBM Plex Mono', monospace",
+                              fontWeight: 700,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 2,
+                            }
+                          : {
+                              ...DISABLED_GRAY_BUTTON_STYLE,
+                              padding: "10px 10px",
+                              fontSize: 12,
+                              border: "1px solid #3E4641",
+                              color: "#7B857E",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 2,
+                            }
+                      }
+                    >
+                      <span>{opt.label}</span>
+                      <span style={{ fontSize: 10, opacity: 0.9 }}>
+                        ({opt.detail})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )
           ) : (
             /* Ação para Arena, Boss, Loja (Shopping e Food and Drink) ou Categorias WIP */
             <button

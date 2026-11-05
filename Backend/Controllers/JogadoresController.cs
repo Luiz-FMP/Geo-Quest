@@ -171,14 +171,15 @@ public class JogadoresController : ControllerBase
 
         var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
 
-        // Regra 9.1: A posição de Home deve ser persistida na sessão inicial e não deve ser sobrescrita a cada movimentação
+        // Seção 2: A Home deve sempre representar a localização atual do usuário quando ele entra no jogo (ou quando definida via debug).
         if (!jogador.HomeLatitude.HasValue || !jogador.HomeLongitude.HasValue || request.ForcarAtualizacao)
         {
             jogador.HomeLatitude = Math.Round(request.Latitude, 6);
             jogador.HomeLongitude = Math.Round(request.Longitude, 6);
+            jogador.PosicaoAtualLatitude = jogador.HomeLatitude;
+            jogador.PosicaoAtualLongitude = jogador.HomeLongitude;
         }
-
-        if (!jogador.PosicaoAtualLatitude.HasValue || !jogador.PosicaoAtualLongitude.HasValue)
+        else if (!jogador.PosicaoAtualLatitude.HasValue || !jogador.PosicaoAtualLongitude.HasValue)
         {
             jogador.PosicaoAtualLatitude = jogador.HomeLatitude;
             jogador.PosicaoAtualLongitude = jogador.HomeLongitude;
@@ -390,9 +391,10 @@ public class JogadoresController : ControllerBase
             jogador.HomeLongitude = Math.Round(request.Longitude.Value, 6);
         }
 
-        int vidaRecuperadaHome = Math.Max(1, (int)Math.Round(atributos.VidaFinal * 0.50, MidpointRounding.AwayFromZero));
-        jogador.VidaAtual = Math.Clamp(jogador.VidaAtual + vidaRecuperadaHome, 1, atributos.VidaFinal);
-        jogador.EnergiaAtual = atributos.EnergiaMaximaFinal;
+        // Seção 4: O descanso na Home deve garantir pelo menos 50% da vida máxima, sem reduzir a vida caso já esteja acima desse valor.
+        // Fórmula: vidaAtual = Math.max(vidaAtual, vidaMaxima * 0.5). Não alterar vida máxima, energia, moedas ou outros atributos.
+        int vidaMinimaHome = (int)Math.Round(atributos.VidaFinal * 0.50, MidpointRounding.AwayFromZero);
+        jogador.VidaAtual = Math.Clamp(Math.Max(jogador.VidaAtual, vidaMinimaHome), 1, atributos.VidaFinal);
 
         if (jogador.HomeLatitude.HasValue && jogador.HomeLongitude.HasValue)
         {
@@ -770,18 +772,22 @@ public class JogadoresController : ControllerBase
             return BadRequest(new { mensagem = "Destino de transporte inválido." });
         }
 
-        string rawSubcategoria = (request.Subcategoria ?? request.DestinoSubcategoria ?? request.OrigemSubcategoria ?? string.Empty)
+        string subcategoria = (request.Subcategoria ?? request.DestinoSubcategoria ?? request.OrigemSubcategoria ?? string.Empty)
             .Trim()
             .ToLowerInvariant();
-        string subcategoria = rawSubcategoria switch
+        if (!PlaceCategoryMapper.IsAllowedTransportationSubcategory(subcategoria))
         {
-            "airport" or "international_airport" or "airstrip" or "heliport" => "airport",
-            "bus_station" or "bus_stop" or "transit_station" or "transit_depot" or "light_rail_station" or "subway_station" or "train_station" => "bus_station",
-            _ => rawSubcategoria
-        };
-        if (subcategoria is not ("airport" or "bus_station"))
+            return BadRequest(new { mensagem = $"Subcategoria de transporte não suportada ('{subcategoria}')." });
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.OrigemSubcategoria) &&
+            !string.IsNullOrWhiteSpace(request.DestinoSubcategoria) &&
+            !string.Equals(
+                request.OrigemSubcategoria.Trim(),
+                request.DestinoSubcategoria.Trim(),
+                StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { mensagem = "Tipo de transporte não suportado. Apenas aeroportos e estações de ônibus são permitidos." });
+            return BadRequest(new { mensagem = "A viagem de transporte só é permitida entre Places da mesma subcategoria." });
         }
 
         if (double.IsNaN(request.DestinoLatitude) || double.IsNaN(request.DestinoLongitude) ||
@@ -930,40 +936,72 @@ public class JogadoresController : ControllerBase
             await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
 
             var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
-            int incrementoAplicado;
-            string mensagemMelhoria;
-
-            switch (opcao)
-            {
-                case "dano":
-                    incrementoAplicado = 1;
-                    jogador.DanoBase += 1;
-                    mensagemMelhoria = "Treino concluído: +1 de Dano permanente aplicado!";
-                    break;
-                case "vida":
-                    incrementoAplicado = 5;
-                    jogador.VidaBase += 5;
-                    // Regra 7.2: Não recuperar 5 pontos de vida atuais.
-                    mensagemMelhoria = "Treino concluído: +5 de Vida máxima permanente aplicado!";
-                    break;
-                case "energia":
-                    incrementoAplicado = 10;
-                    jogador.EnergiaBase = Math.Round(jogador.EnergiaBase + 10.0, 2);
-                    // Regra 7.2: Não recuperar 10 pontos de energia atuais.
-                    mensagemMelhoria = "Treino concluído: +10 de Energia máxima permanente aplicado!";
-                    break;
-                default: // "velocidade"
-                    incrementoAplicado = 1;
-                    jogador.VelocidadeBase += 1;
-                    mensagemMelhoria = "Treino concluído: +1 de Velocidade permanente aplicado!";
-                    break;
-            }
-
             string placeId = request.PlaceId.Trim();
             string nome = string.IsNullOrWhiteSpace(request.Nome) ? "Centro Esportivo" : request.Nome.Trim();
             string subcategoria = string.IsNullOrWhiteSpace(request.Subcategoria)
                 ? "gym"
                 : request.Subcategoria.Trim().ToLowerInvariant();
+
+            var estadoPlace = await ObterOuCriarEstadoPermanenteAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategorySports,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                cancellationToken);
+
+            if (estadoPlace.Concluido)
+            {
+                return BadRequest(new
+                {
+                    mensagem = "A melhoria permanente deste local esportivo já foi adquirida. Cada Place de Sports permite apenas um aprimoramento."
+                });
+            }
+
+            int incrementoAplicado;
+            string mensagemMelhoria;
+            string rotuloMelhoria;
+
+            switch (opcao)
+            {
+                case "dano":
+                    incrementoAplicado = 1;
+                    rotuloMelhoria = "+1 Dano";
+                    jogador.DanoBase += 1;
+                    mensagemMelhoria = "Treino concluído: +1 de Dano permanente aplicado!";
+                    break;
+                case "vida":
+                    incrementoAplicado = 5;
+                    rotuloMelhoria = "+5 Vida máxima";
+                    jogador.VidaBase += 5;
+                    // Regra: Não recuperar 5 pontos de vida atuais.
+                    mensagemMelhoria = "Treino concluído: +5 de Vida máxima permanente aplicado!";
+                    break;
+                case "energia":
+                    incrementoAplicado = 10;
+                    rotuloMelhoria = "+10 Energia máxima";
+                    jogador.EnergiaBase = Math.Round(jogador.EnergiaBase + 10.0, 2);
+                    // Regra: Não recuperar 10 pontos de energia atuais.
+                    mensagemMelhoria = "Treino concluído: +10 de Energia máxima permanente aplicado!";
+                    break;
+                default: // "velocidade"
+                    incrementoAplicado = 1;
+                    rotuloMelhoria = "+1 Velocidade";
+                    jogador.VelocidadeBase += 1;
+                    mensagemMelhoria = "Treino concluído: +1 de Velocidade permanente aplicado!";
+                    break;
+            }
+
+            estadoPlace.Concluido = true;
+            estadoPlace.EstoqueJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                melhoria = opcao,
+                incremento = incrementoAplicado,
+                rotulo = rotuloMelhoria
+            });
+            estadoPlace.UltimaAtualizacaoUtc = DateTime.UtcNow;
 
             if (request.Latitude != 0 || request.Longitude != 0)
             {
@@ -979,8 +1017,8 @@ public class JogadoresController : ControllerBase
                 subcategoria,
                 request.Latitude,
                 request.Longitude,
-                estadoInteracao: $"Treino ({opcao} +{incrementoAplicado})",
-                marcarConcluido: false,
+                estadoInteracao: $"Concluído ({rotuloMelhoria})",
+                marcarConcluido: true,
                 marcarCuraGratuita: false,
                 cancellationToken);
 

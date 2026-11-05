@@ -1,5 +1,104 @@
+import { isAllowedTransportationSubcategory } from "../utils/placeCategories.js";
+
 const DIRECT_API_BASE = import.meta.env?.VITE_API_BASE_URL || "http://127.0.0.1:5208";
 const LOCAL_STORAGE_KEY = "geoquest_player_state_v1";
+const DEBUG_COORDS_STORAGE_KEY = "geoquest_debug_coords_v1";
+
+export function getDebugCoordinatesConfig() {
+  try {
+    const raw = localStorage.getItem(DEBUG_COORDS_STORAGE_KEY);
+    if (!raw) {
+      return { enabled: false, latitude: "", longitude: "" };
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      enabled: Boolean(parsed?.enabled),
+      latitude:
+        parsed?.latitude !== undefined && parsed?.latitude !== null && parsed?.latitude !== ""
+          ? Number(parsed.latitude)
+          : "",
+      longitude:
+        parsed?.longitude !== undefined && parsed?.longitude !== null && parsed?.longitude !== ""
+          ? Number(parsed.longitude)
+          : "",
+    };
+  } catch {
+    return { enabled: false, latitude: "", longitude: "" };
+  }
+}
+
+export function validateDebugCoordinates(latitude, longitude) {
+  const latStr = String(latitude ?? "").trim();
+  const lngStr = String(longitude ?? "").trim();
+  if (!latStr || !lngStr) {
+    return {
+      valid: false,
+      error: "Informe valores numéricos para latitude e longitude.",
+    };
+  }
+
+  const latNum = Number(latStr);
+  const lngNum = Number(lngStr);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return {
+      valid: false,
+      error: "Latitude e longitude devem ser números válidos.",
+    };
+  }
+
+  if (latNum < -90 || latNum > 90) {
+    return {
+      valid: false,
+      error: "Latitude inválida: informe um valor entre -90 e 90.",
+    };
+  }
+
+  if (lngNum < -180 || lngNum > 180) {
+    return {
+      valid: false,
+      error: "Longitude inválida: informe um valor entre -180 e 180.",
+    };
+  }
+
+  return {
+    valid: true,
+    latitude: Number(latNum.toFixed(6)),
+    longitude: Number(lngNum.toFixed(6)),
+  };
+}
+
+export function saveDebugCoordinatesConfig({ enabled, latitude, longitude }) {
+  const isEnabled = Boolean(enabled);
+  const hasAnyCoordInput =
+    String(latitude ?? "").trim() !== "" || String(longitude ?? "").trim() !== "";
+
+  if (isEnabled || hasAnyCoordInput) {
+    const validation = validateDebugCoordinates(latitude, longitude);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+    const config = {
+      enabled: isEnabled,
+      latitude: validation.latitude,
+      longitude: validation.longitude,
+    };
+    try {
+      localStorage.setItem(DEBUG_COORDS_STORAGE_KEY, JSON.stringify(config));
+    } catch {
+      // Ignora falha de escrita em storage restrito
+    }
+    return config;
+  }
+
+  const disabledConfig = { enabled: false, latitude: "", longitude: "" };
+  try {
+    localStorage.setItem(DEBUG_COORDS_STORAGE_KEY, JSON.stringify(disabledConfig));
+  } catch {
+    // Ignora falha de escrita em storage restrito
+  }
+  return disabledConfig;
+}
 
 const DEFAULT_CHARACTERS = [
   {
@@ -272,6 +371,7 @@ function upsertLocalPlaceVisitAndState(
     marcarConcluido = false,
     marcarCuraGratuita = false,
     salvarCheckpointDescanso = false,
+    estoqueJson = undefined,
   },
 ) {
   if (!placeId || placeId === "home") return;
@@ -296,10 +396,13 @@ function upsertLocalPlaceVisitAndState(
       concluido: false,
       curaGratuitaUtilizada: false,
       lojaEsgotada: false,
+      estadoInteracao: estadoInteracao || "Visitado",
       estoqueJson:
-        categoria === "Shopping" && subcategoria !== "shopping_mall"
-          ? '{"slots":10,"reabastecimento":false}'
-          : null,
+        estoqueJson !== undefined
+          ? estoqueJson
+          : categoria === "Shopping" && subcategoria !== "shopping_mall"
+            ? '{"slots":10,"reabastecimento":false}'
+            : null,
       ultimaAtualizacaoUtc: nowIso,
     };
     local.estadosPlaces.push(estado);
@@ -310,6 +413,12 @@ function upsertLocalPlaceVisitAndState(
     if (latitude || longitude) {
       estado.latitude = latitude;
       estado.longitude = longitude;
+    }
+    if (estadoInteracao) {
+      estado.estadoInteracao = estadoInteracao;
+    }
+    if (estoqueJson !== undefined) {
+      estado.estoqueJson = estoqueJson;
     }
     estado.ultimaAtualizacaoUtc = nowIso;
   }
@@ -545,7 +654,7 @@ export async function atualizarVidaJogador(
 export async function definirHomeJogador(
   latitude,
   longitude,
-  forcarAtualizacao = false,
+  forcarAtualizacao = true,
 ) {
   try {
     const updated = await requestApi("/api/jogadores/atual/home", {
@@ -562,12 +671,13 @@ export async function definirHomeJogador(
         nome: "Home",
         categoria: "Local especial",
         subcategoria: "home",
-        latitude: Number(latitude.toFixed(6)),
-        longitude: Number(longitude.toFixed(6)),
+        latitude: Number(Number(latitude).toFixed(6)),
+        longitude: Number(Number(longitude).toFixed(6)),
         dataVisitaUtc: new Date().toISOString(),
       };
-    }
-    if (!local.posicaoAtualLatitude || !local.posicaoAtualLongitude) {
+      local.posicaoAtualLatitude = local.home.latitude;
+      local.posicaoAtualLongitude = local.home.longitude;
+    } else if (!local.posicaoAtualLatitude || !local.posicaoAtualLongitude) {
       local.posicaoAtualLatitude = local.home.latitude;
       local.posicaoAtualLongitude = local.home.longitude;
     }
@@ -767,12 +877,11 @@ export async function descansarEmHomeJogador(latitude = null, longitude = null) 
     if (err?.isBusinessError) throw err;
     const local = getOrCreateLocalState();
     const maxVida = local.atributos?.vidaFinal ?? 50;
-    const recVida = Math.max(1, Math.round(maxVida * 0.5));
+    const vidaMinimaDescanso = Math.round(maxVida * 0.5);
     local.atributos.vidaAtual = Math.min(
       maxVida,
-      Math.max(1, (local.atributos.vidaAtual ?? 0) + recVida),
+      Math.max(local.atributos.vidaAtual ?? 0, vidaMinimaDescanso),
     );
-    local.atributos.energiaAtual = local.atributos?.energiaMaximaFinal ?? 100;
     if (local.home) {
       local.posicaoAtualLatitude = local.home.latitude;
       local.posicaoAtualLongitude = local.home.longitude;
@@ -1347,18 +1456,13 @@ export async function viajarTransporteJogador({
   destinoLongitude = 0,
   distanciaKm = null,
 }) {
-  const rawSub = String(
-    subcategoria || destinoSubcategoria || origemSubcategoria || "",
-  )
+  const rawOriginSub = String(origemSubcategoria || subcategoria || destinoSubcategoria || "")
     .trim()
     .toLowerCase();
-  const normalizedSub =
-    rawSub === "airport" ||
-    rawSub === "international_airport" ||
-    rawSub === "airstrip" ||
-    rawSub === "heliport"
-      ? "airport"
-      : "bus_station";
+  const rawDestSub = String(destinoSubcategoria || subcategoria || origemSubcategoria || "")
+    .trim()
+    .toLowerCase();
+  const normalizedSub = rawDestSub || rawOriginSub;
 
   try {
     const response = await requestApi(
@@ -1368,11 +1472,11 @@ export async function viajarTransporteJogador({
         body: JSON.stringify({
           origemPlaceId,
           origemNome,
-          origemSubcategoria: normalizedSub,
+          origemSubcategoria: rawOriginSub || normalizedSub,
           destinoPlaceId,
           destinoNome,
           subcategoria: normalizedSub,
-          destinoSubcategoria: normalizedSub,
+          destinoSubcategoria: rawDestSub || normalizedSub,
           origemLatitude,
           origemLongitude,
           destinoLatitude,
@@ -1389,9 +1493,16 @@ export async function viajarTransporteJogador({
     if (err?.isBusinessError) throw err;
 
     const local = getOrCreateLocalState();
-    if (normalizedSub !== "airport" && normalizedSub !== "bus_station") {
+    if (!isAllowedTransportationSubcategory(normalizedSub)) {
       throw new Error(
-        "Tipo de transporte não suportado. Apenas aeroportos e estações de ônibus são permitidos.",
+        "Subcategoria de transporte inválida ou não suportada pelas 24 subcategorias oficiais.",
+        { cause: err },
+      );
+    }
+
+    if (rawOriginSub && rawDestSub && rawOriginSub !== rawDestSub) {
+      throw new Error(
+        `O destino selecionado (${rawDestSub}) não pertence à mesma subcategoria do local de origem (${rawOriginSub}).`,
         { cause: err },
       );
     }
@@ -1490,20 +1601,34 @@ export async function treinarSportsJogador({
     if (err?.isBusinessError) throw err;
 
     const local = getOrCreateLocalState();
+    const estadoExistente = (local.estadosPlaces || []).find(
+      (e) => e.placeId === placeId,
+    );
+    if (estadoExistente?.concluido) {
+      throw new Error(
+        "Você já realizou o aprimoramento permanente disponível neste local esportivo.",
+        { cause: err },
+      );
+    }
+
     let incrementoAplicado;
+    let rotuloMelhoria;
     let mensagem;
 
     if (normalizedOption === "dano") {
       incrementoAplicado = 1;
+      rotuloMelhoria = "+1 Dano";
       local.atributos.danoBase = (local.atributos?.danoBase ?? 10) + 1;
       mensagem = "Treino concluído: +1 de Dano permanente aplicado!";
     } else if (normalizedOption === "vida") {
       incrementoAplicado = 5;
+      rotuloMelhoria = "+5 Vida máxima";
       local.atributos.vidaBase = (local.atributos?.vidaBase ?? 50) + 5;
       // Regra 7.2: Não recuperar 5 pontos de vida atuais.
       mensagem = "Treino concluído: +5 de Vida máxima permanente aplicado!";
     } else if (normalizedOption === "energia") {
       incrementoAplicado = 10;
+      rotuloMelhoria = "+10 Energia máxima";
       local.atributos.energiaBase = Number(
         ((local.atributos?.energiaBase ?? 100) + 10).toFixed(2),
       );
@@ -1511,6 +1636,7 @@ export async function treinarSportsJogador({
       mensagem = "Treino concluído: +10 de Energia máxima permanente aplicado!";
     } else if (normalizedOption === "velocidade") {
       incrementoAplicado = 1;
+      rotuloMelhoria = "+1 Velocidade";
       local.atributos.velocidadeBase =
         (local.atributos?.velocidadeBase ?? 0) + 1;
       mensagem = "Treino concluído: +1 de Velocidade permanente aplicado!";
@@ -1533,7 +1659,13 @@ export async function treinarSportsJogador({
       subcategoria,
       latitude,
       longitude,
-      estadoInteracao: `Treino (${normalizedOption} +${incrementoAplicado})`,
+      estadoInteracao: `Treino concluído (${rotuloMelhoria})`,
+      marcarConcluido: true,
+      estoqueJson: JSON.stringify({
+        melhoria: normalizedOption,
+        incremento: incrementoAplicado,
+        rotulo: rotuloMelhoria,
+      }),
     });
 
     local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();

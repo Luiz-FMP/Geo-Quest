@@ -19,7 +19,9 @@ import {
 import {
   createHomePlace,
   getTranslatedSubcategory,
+  isAllowedTransportationSubcategory,
   normalizePlaceRecord,
+  resolveTransportationSubcategory,
 } from "../utils/placeCategories";
 import CombatScreen from "./combat/CombatScreen";
 import PlaceArrivalModal from "./PlaceArrivalModal";
@@ -29,8 +31,9 @@ import RecoveryModal from "./RecoveryModal";
 const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v2";
 const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
-const PROGRESSIVE_TRANSPORT_RADII_METERS = [1200, 5000, 15000, 30000, 50000];
-const MAX_TRANSPORT_DESTINATIONS = 10;
+const PROGRESSIVE_TRANSPORT_RADII_METERS = [5000, 15000, 30000, 50000];
+const ADEQUATE_TRANSPORT_DESTINATIONS = 5;
+const MAX_TRANSPORT_DESTINATIONS = 20;
 
 const GAME_MAP_STYLES = [
   { elementType: "geometry", stylers: [{ color: "#1d2c22" }] },
@@ -394,10 +397,20 @@ function GameMapContent({
   const allDiscoveredPlacesRef = useRef([]);
   const inFlightCenterRef = useRef(null);
 
-  // Place especial Home (Seção 9): fixo no ponto inicial do jogador
+  // Place especial Home (Item 2): representa sempre a localização atual do usuário ao iniciar a sessão (ou coordenadas de debug)
   const homeLat = playerState?.home?.latitude;
   const homeLng = playerState?.home?.longitude;
   const homeCoords = useMemo(() => {
+    if (
+      initialCoords &&
+      typeof initialCoords.lat === "number" &&
+      typeof initialCoords.lng === "number"
+    ) {
+      return {
+        lat: initialCoords.lat,
+        lng: initialCoords.lng,
+      };
+    }
     if (typeof homeLat === "number" && typeof homeLng === "number") {
       return {
         lat: homeLat,
@@ -409,19 +422,40 @@ function GameMapContent({
 
   const homePlace = useMemo(() => createHomePlace(homeCoords), [homeCoords]);
 
+  const prevInitialCoordsRef = useRef(
+    initialCoords ? `${initialCoords.lat}:${initialCoords.lng}` : null,
+  );
+  useEffect(() => {
+    if (
+      !initialCoords ||
+      typeof initialCoords.lat !== "number" ||
+      typeof initialCoords.lng !== "number"
+    ) {
+      return;
+    }
+    const key = `${initialCoords.lat}:${initialCoords.lng}`;
+    if (prevInitialCoordsRef.current !== key) {
+      prevInitialCoordsRef.current = key;
+      const nextPos = { lat: initialCoords.lat, lng: initialCoords.lng };
+      setPlayerCoords(nextPos);
+      if (map) {
+        map.panTo(nextPos);
+      }
+    }
+  }, [initialCoords, map]);
+
   useEffect(() => {
     if (homeInitializedRef.current) return;
     if (
       initialCoords &&
       typeof initialCoords.lat === "number" &&
       typeof initialCoords.lng === "number" &&
-      !playerState?.home &&
       onDefineHome
     ) {
       homeInitializedRef.current = true;
-      onDefineHome(initialCoords.lat, initialCoords.lng).catch(() => {});
+      onDefineHome(initialCoords.lat, initialCoords.lng, true).catch(() => {});
     }
-  }, [initialCoords, playerState?.home, onDefineHome]);
+  }, [initialCoords, onDefineHome]);
 
   // Alterna o estilo visual do Google Map quando entra ou sai do modo de transporte (Seção 5.2)
   useEffect(() => {
@@ -710,22 +744,42 @@ function GameMapContent({
     return () => clearTimeout(timerId);
   }, [map, placesLib, initialCoords, fetchNearbyPlaces]);
 
-  // Seção 5.3: Busca híbrida progressiva de destinos de transporte do mesmo tipo (airport -> airport, bus_station -> bus_station)
+  // Item 6: Busca progressiva de destinos de transporte exclusivamente da mesma subcategoria
   const handleOpenTransportMap = useCallback(
     async (originPlace) => {
       if (!originPlace) return;
 
-      const rawSub = String(originPlace.subcategory || "").toLowerCase();
-      const transportType = rawSub.includes("airport")
-        ? "airport"
-        : "bus_station";
+      const transportType = resolveTransportationSubcategory(
+        originPlace.primaryType,
+        originPlace.types,
+        originPlace.subcategory,
+      );
 
       clearRoutePolyline();
       stopMovementAnimation();
       setArrivedPlace(null);
 
+      if (!transportType || !isAllowedTransportationSubcategory(transportType)) {
+        setTransportMode({
+          originPlace,
+          transportType: originPlace.subcategory || "transit_station",
+          destinations: [],
+          isLoading: false,
+          error:
+            "Não foi possível identificar uma subcategoria oficial de transporte para este local.",
+          selectedDestination: null,
+          isTraveling: false,
+          travelError: null,
+          maxRadiusReachedMeters: 0,
+        });
+        return;
+      }
+
       setTransportMode({
-        originPlace,
+        originPlace: {
+          ...originPlace,
+          subcategory: transportType,
+        },
         transportType,
         destinations: [],
         isLoading: true,
@@ -733,7 +787,7 @@ function GameMapContent({
         selectedDestination: null,
         isTraveling: false,
         travelError: null,
-        maxRadiusReachedMeters: 1200,
+        maxRadiusReachedMeters: PROGRESSIVE_TRANSPORT_RADII_METERS[0],
       });
 
       const originCoord = { lat: originPlace.lat, lng: originPlace.lng };
@@ -746,12 +800,19 @@ function GameMapContent({
         const lng = Number(rawItem.lng ?? rawItem.longitude);
         if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
 
-        // Valida categoria e subcategoria para garantir que somente lugares do mesmo tipo de transporte apareçam
-        if (
-          rawItem.category &&
-          (rawItem.category !== "Transportation" ||
-            rawItem.subcategory !== transportType)
-        ) {
+        if (rawItem.category && rawItem.category !== "Transportation") {
+          return null;
+        }
+
+        // Identifica a subcategoria exata do candidato usando primaryType, types ou subcategory
+        const resolvedCandidateSub = resolveTransportationSubcategory(
+          rawItem.primaryType,
+          rawItem.types,
+          rawItem.subcategory,
+        );
+
+        // Regra estrita: exibir exclusivamente Places da mesma subcategoria (ex.: bus_station -> somente bus_station)
+        if (!resolvedCandidateSub || resolvedCandidateSub !== transportType) {
           return null;
         }
 
@@ -793,6 +854,8 @@ function GameMapContent({
           name: rawItem.name || "Terminal de Transporte",
           category: "Transportation",
           subcategory: transportType,
+          primaryType: rawItem.primaryType || transportType,
+          types: Array.isArray(rawItem.types) ? rawItem.types : [transportType],
           lat,
           lng,
           address: rawItem.address || null,
@@ -843,13 +906,12 @@ function GameMapContent({
         }
       };
 
-      // Pré-carrega candidatos compatíveis já conhecidos no mapa para garantir destinos imediatos do mesmo subtipo
+      // Pré-carrega candidatos compatíveis já conhecidos no mapa apenas se forem exatamente da mesma subcategoria
       const collectedById = new globalThis.Map();
       for (const known of [...places, ...allDiscoveredPlacesRef.current]) {
         if (
           known &&
           known.category === "Transportation" &&
-          known.subcategory === transportType &&
           known.id !== originPlace.id
         ) {
           const norm = normalizeDestinationEntry(known);
@@ -859,7 +921,7 @@ function GameMapContent({
         }
       }
 
-      // 1. Tenta endpoint dedicado do Backend (Places API New progressivo 1200m -> 50km)
+      // 1. Tenta endpoint dedicado do Backend (Places API New progressivo 5km -> 50km pela subcategoria exata)
       try {
         const backendData = await buscarDestinosTransporte({
           lat: originCoord.lat,
@@ -868,33 +930,33 @@ function GameMapContent({
           excludePlaceId: originPlace.id,
         });
 
-        if (
-          Array.isArray(backendData?.destinations) &&
-          backendData.destinations.length > 0
-        ) {
+        if (Array.isArray(backendData?.destinations)) {
           const mergedBackend = [
             ...Array.from(collectedById.values()),
             ...backendData.destinations,
           ];
-          applyFoundDestinations(
-            mergedBackend,
-            backendData.radiusMetersUsed ||
-              backendData.maxRadiusReachedMeters ||
-              1200,
-          );
-          return;
+          // Se o backend retornou destinos válidos (ou se a API backend concluiu a varredura até 50km)
+          if (
+            mergedBackend.length > 0 ||
+            (backendData.maxRadiusReachedMeters ?? 0) >= 50000
+          ) {
+            applyFoundDestinations(
+              mergedBackend,
+              backendData.radiusMetersUsed ||
+                backendData.maxRadiusReachedMeters ||
+                PROGRESSIVE_TRANSPORT_RADII_METERS[0],
+            );
+            return;
+          }
         }
       } catch {
         // Prossegue para busca progressiva via Google Places API (New) no navegador
       }
 
-      // 2. Fallback híbrido progressivo no navegador: raios [1200, 5000, 15000, 30000, 50000] metros
-      let lastRadiusUsed = 1200;
+      // 2. Fallback híbrido progressivo no navegador: raios [5000, 15000, 30000, 50000] metros exclusivamente para transportType
+      let lastRadiusUsed = PROGRESSIVE_TRANSPORT_RADII_METERS[0];
       const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-      const searchIncludedTypes =
-        transportType === "airport"
-          ? ["airport", "international_airport", "airstrip"]
-          : ["bus_station", "bus_stop"];
+      const searchIncludedTypes = [transportType];
 
       for (const radiusMeters of PROGRESSIVE_TRANSPORT_RADII_METERS) {
         lastRadiusUsed = radiusMeters;
@@ -992,7 +1054,7 @@ function GameMapContent({
           }
         }
 
-        // 2c. Fallback legado PlacesService.nearbySearch filtrado estritamente pelo tipo de transporte
+        // 2c. Fallback legado PlacesService.nearbySearch filtrado estritamente pela subcategoria exata
         if (radiusBatch.length === 0 && map && placesLib?.PlacesService) {
           try {
             radiusBatch = await new Promise((resolve) => {
@@ -1043,7 +1105,7 @@ function GameMapContent({
           }
         }
 
-        if (collectedById.size >= MAX_TRANSPORT_DESTINATIONS) {
+        if (collectedById.size >= ADEQUATE_TRANSPORT_DESTINATIONS) {
           break;
         }
       }

@@ -1,11 +1,45 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { calcularOrdemIniciativa } from "../../services/CombatEngine";
 import CombatArena from "./CombatArena";
 import CombatHUD from "./CombatHud";
 import CombatRewardModal from "./CombatReward";
 
+function obterInimigosMaisRapidosQueJogador(personagem, listaInimigos) {
+  const ordem = calcularOrdemIniciativa(personagem, listaInimigos);
+  const idxJogador = ordem.findIndex((p) => p.tipo === "jogador");
+  if (idxJogador <= 0) return [];
+  return ordem
+    .slice(0, idxJogador)
+    .filter((p) => p.tipo === "inimigo" && p.inimigoRef)
+    .map((p) => p.inimigoRef);
+}
+
+function ordenarInimigosPorIniciativa(personagem, listaInimigos) {
+  return calcularOrdemIniciativa(personagem, listaInimigos)
+    .filter((p) => p.tipo === "inimigo" && p.inimigoRef)
+    .map((p) => p.inimigoRef);
+}
+
+function formatarResumoIniciativa(ordem) {
+  return ordem.map((p) => `${p.nome} (VEL ${p.velocidade})`).join(" → ");
+}
+
 export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat }) {
+  const primeiraRonda = useMemo(
+    () => sessaoCombate?.rondas?.[0] || [],
+    [sessaoCombate],
+  );
+  const ordemInicial = useMemo(
+    () => calcularOrdemIniciativa(personagem, primeiraRonda),
+    [personagem, primeiraRonda],
+  );
+  const inimigosIniciaisMaisRapidos = useMemo(
+    () => obterInimigosMaisRapidosQueJogador(personagem, primeiraRonda),
+    [personagem, primeiraRonda],
+  );
+
   const [rondaIndex, setRondaIndex] = useState(0);
-  const [inimigos, setInimigos] = useState(sessaoCombate.rondas[0]);
+  const [inimigos, setInimigos] = useState(primeiraRonda);
   const [alvoIndex, setAlvoIndex] = useState(0);
 
   const initialHp =
@@ -20,7 +54,9 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
   const [hpJogador, setHpJogador] = useState(initialHp);
   const [energiaJogador, setEnergiaJogador] = useState(initialEnergia);
   const [defendendo, setDefendendo] = useState(false);
-  const [turnoBloqueado, setTurnoBloqueado] = useState(false);
+  const [turnoBloqueado, setTurnoBloqueado] = useState(
+    () => inimigosIniciaisMaisRapidos.length > 0,
+  );
 
   const [animacaoJogador, setAnimacaoJogador] = useState(false);
   const [danoRecebidoAnim, setDanoRecebidoAnim] = useState(false);
@@ -29,9 +65,15 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
   const [inimigosDerrotadosHistorico, setInimigosDerrotadosHistorico] = useState([]);
   const [resultadoRecompensa, setResultadoRecompensa] = useState(null);
 
-  const [logs, setLogs] = useState([
+  const [logs, setLogs] = useState(() => [
+    `⚡ Iniciativa (Ronda 1): ${formatarResumoIniciativa(ordemInicial)}`,
     `[${sessaoCombate.tipoCombate.toUpperCase()}] Combate iniciado em ${sessaoCombate.nomeLocal}!`,
   ]);
+
+  const ordemIniciativaAtual = useMemo(
+    () => calcularOrdemIniciativa(personagem, inimigos),
+    [personagem, inimigos],
+  );
 
   const adicionarLog = (msg) => setLogs((prev) => [msg, ...prev.slice(0, 5)]);
 
@@ -85,18 +127,26 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
     });
   };
 
-  const executarTurnoInimigos = (inimigosVivos, escudoAtivo) => {
+  const executarTurnoInimigos = (inimigosParaAgir, escudoAtivo) => {
     setTimeout(() => {
-      // Se o combate já foi ganho no meio do timer, cancela o turno
-      if (inimigosVivos.length === 0) return;
+      const inimigosOrdenados = ordenarInimigosPorIniciativa(
+        personagem,
+        inimigosParaAgir,
+      );
+      if (inimigosOrdenados.length === 0) {
+        setTurnoBloqueado(false);
+        return;
+      }
 
       let danoTotalRecebido = 0;
 
-      inimigosVivos.forEach((ini) => {
+      inimigosOrdenados.forEach((ini) => {
         let dano = calcularDano(ini.ataque, personagem.defesa);
         if (escudoAtivo) dano = Math.max(1, Math.floor(dano * 0.5));
         danoTotalRecebido += dano;
-        adicionarLog(`🔻 ${ini.nome} atacou causando ${dano} de dano!`);
+        adicionarLog(
+          `🔻 ${ini.nome} (VEL ${ini.velocidade}) atacou causando ${dano} de dano!`,
+        );
       });
 
       setDanoRecebidoAnim(true);
@@ -116,6 +166,16 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
     }, 750);
   };
 
+  // No início do combate (Ronda 1), se houver inimigos com maior Velocidade que o jogador, eles agem primeiro
+  const aberturaRondaZeroExecutadaRef = useRef(false);
+  useEffect(() => {
+    if (aberturaRondaZeroExecutadaRef.current) return;
+    aberturaRondaZeroExecutadaRef.current = true;
+    if (inimigosIniciaisMaisRapidos.length > 0) {
+      executarTurnoInimigos(inimigosIniciaisMaisRapidos, false);
+    }
+  });
+
   const verificarEstadoInimigos = (listaAtualizada, escudoAtivo = false) => {
     const vivos = listaAtualizada.filter((i) => i.vidaAtual > 0);
     const mortosNestaRodada = listaAtualizada.filter((i) => i.vidaAtual === 0);
@@ -132,10 +192,26 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
           `⚡ Ronda ${rondaIndex + 1} concluída! Prepare-se para a Ronda ${proximaRonda + 1}!`
         );
         setTimeout(() => {
+          const inimigosProxRonda = sessaoCombate.rondas[proximaRonda] || [];
+          const novaOrdem = calcularOrdemIniciativa(personagem, inimigosProxRonda);
+          const maisRapidosProxRonda = obterInimigosMaisRapidosQueJogador(
+            personagem,
+            inimigosProxRonda,
+          );
+
           setRondaIndex(proximaRonda);
-          setInimigos(sessaoCombate.rondas[proximaRonda]);
+          setInimigos(inimigosProxRonda);
           setAlvoIndex(0);
-          setTurnoBloqueado(false);
+          adicionarLog(
+            `⚡ Iniciativa (Ronda ${proximaRonda + 1}): ${formatarResumoIniciativa(novaOrdem)}`,
+          );
+
+          if (maisRapidosProxRonda.length > 0) {
+            setTurnoBloqueado(true);
+            executarTurnoInimigos(maisRapidosProxRonda, false);
+          } else {
+            setTurnoBloqueado(false);
+          }
         }, 1200);
       } else {
         adicionarLog(`🏆 Vitória! Todos os inimigos foram derrotados!`);
@@ -260,8 +336,11 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
           </h2>
         </div>
 
-        <div style={{ fontSize: 12, color: "#9CAEA0" }}>
-          Clique num inimigo à direita para mudar o alvo
+        <div style={{ fontSize: 12, color: "#9CAEA0", textAlign: "right" }}>
+          <div data-testid="combat-initiative-order" style={{ color: "#C89B5C", fontSize: 11, marginBottom: 2 }}>
+            Iniciativa: {formatarResumoIniciativa(ordemIniciativaAtual)}
+          </div>
+          <div>Clique num inimigo à direita para mudar o alvo</div>
         </div>
       </div>
 
@@ -281,7 +360,6 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
       {/* PAINEL DE CONTROLOS E LOGS (METADE INFERIOR) */}
       <CombatHUD
         personagem={personagem}
-        hpJogador={hpJogador}
         energiaJogador={energiaJogador}
         alvoAtual={inimigos[alvoIndex] || inimigos[0]}
         turnoBloqueado={turnoBloqueado}

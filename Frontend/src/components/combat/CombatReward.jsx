@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function CombatRewardModal({ recompensa, onClaim }) {
   if (!recompensa) return null;
 
