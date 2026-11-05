@@ -1,4 +1,5 @@
 import React from "react";
+import CharacterAnimatedSprite from "./CharacterAnimatedSprite";
 
 const CORES_PERSONAGEM = {
   Miguel: { cor: "#38BDF8", bg: "#112233", codigo: "EXP-01" },
