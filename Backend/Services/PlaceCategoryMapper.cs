@@ -36,7 +36,17 @@ public class PlaceCategoryMapper
     public const string FunctionHospital = "hospital";
     public const string FunctionLodging = "lodging";
     public const string FunctionHome = "home";
+    public const string FunctionExploration = "exploration";
+    public const string FunctionTransport = "transport";
+    public const string FunctionCulture = "culture";
+    public const string FunctionSports = "sports";
     public const string FunctionWip = "wip";
+
+    private static readonly string[] SpecificNaturalSubcategories =
+    [
+        "beach", "island", "lake", "mountain_peak", "nature_preserve",
+        "river", "scenic_spot", "woods"
+    ];
 
     /// <summary>
     /// Ordem de prioridade centralizada e documentada para desempate quando o primaryType
@@ -202,7 +212,8 @@ public class PlaceCategoryMapper
             var primaryCategory = FindCategoryForSubcategory(normalizedPrimary);
             if (primaryCategory is not null)
             {
-                return BuildResult(primaryCategory, normalizedPrimary);
+                var resolvedSubcategory = ResolveSpecificSubcategory(primaryCategory, normalizedPrimary, normalizedTypes);
+                return BuildResult(primaryCategory, resolvedSubcategory);
             }
         }
 
@@ -211,12 +222,21 @@ public class PlaceCategoryMapper
         {
             var matchedSubcategory = normalizedTypes.FirstOrDefault(
                 t => !string.Equals(t, "store", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(t, "natural_feature", StringComparison.OrdinalIgnoreCase) &&
                      subcategories.Contains(t));
 
             if (matchedSubcategory is not null)
             {
-                return BuildResult(category, matchedSubcategory);
+                var resolvedSubcategory = ResolveSpecificSubcategory(category, matchedSubcategory, normalizedTypes);
+                return BuildResult(category, resolvedSubcategory);
             }
+        }
+
+        if (normalizedTypes.Contains("natural_feature", StringComparer.OrdinalIgnoreCase))
+        {
+            var specificNatural = SpecificNaturalSubcategories.FirstOrDefault(
+                s => normalizedTypes.Contains(s, StringComparer.OrdinalIgnoreCase)) ?? "woods";
+            return BuildResult(CategoryNaturalFeatures, specificNatural);
         }
 
         if (normalizedTypes.Contains("store", StringComparer.OrdinalIgnoreCase))
@@ -226,6 +246,37 @@ public class PlaceCategoryMapper
 
         // 5. Se não for possível classificar o Place em uma das 10 categorias permitidas, descarta-o.
         return null;
+    }
+
+    private static string ResolveSpecificSubcategory(string category, string candidateSubcategory, List<string> normalizedTypes)
+    {
+        if (string.Equals(category, CategoryNaturalFeatures, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(candidateSubcategory, "natural_feature", StringComparison.OrdinalIgnoreCase))
+            {
+                return SpecificNaturalSubcategories.FirstOrDefault(
+                    s => normalizedTypes.Contains(s, StringComparer.OrdinalIgnoreCase)) ?? "woods";
+            }
+            return candidateSubcategory;
+        }
+
+        if (string.Equals(category, CategoryTransportation, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(candidateSubcategory, "airport", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidateSubcategory, "international_airport", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidateSubcategory, "airstrip", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(candidateSubcategory, "heliport", StringComparison.OrdinalIgnoreCase) ||
+                normalizedTypes.Contains("airport", StringComparer.OrdinalIgnoreCase) ||
+                normalizedTypes.Contains("international_airport", StringComparer.OrdinalIgnoreCase) ||
+                normalizedTypes.Contains("airstrip", StringComparer.OrdinalIgnoreCase))
+            {
+                return "airport";
+            }
+
+            return "bus_station";
+        }
+
+        return candidateSubcategory;
     }
 
     private static string? FindCategoryForSubcategory(string subcategory)
@@ -274,8 +325,32 @@ public class PlaceCategoryMapper
                 Subcategory: subcategory,
                 PlaceFunction: FunctionShop,
                 IsBossSpecial: false,
-                InteractionHint: "Explore esta loja e confira os produtos disponíveis.",
+                InteractionHint: "Loja de equipamentos. Confira a vitrine e gerencie seu inventário de equipamentos.",
                 ActionLabel: "LOJA"
+            );
+        }
+
+        if (string.Equals(category, CategoryFoodAndDrink, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryFoodAndDrink,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionShop,
+                IsBossSpecial: false,
+                InteractionHint: "Loja de consumíveis. Confira a vitrine e gerencie seu inventário de consumíveis.",
+                ActionLabel: "LOJA"
+            );
+        }
+
+        if (string.Equals(category, CategoryServices, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryServices,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionShop,
+                IsBossSpecial: false,
+                InteractionHint: "Estabelecimento de serviços que oferece aprimoramentos temporários por 50g.",
+                ActionLabel: "COMPRAR BUFF (50g)"
             );
         }
 
@@ -300,6 +375,54 @@ public class PlaceCategoryMapper
                 IsBossSpecial: false,
                 InteractionHint: "Este local permite recuperar sua Energia e funciona como checkpoint caso você fique exausto.",
                 ActionLabel: "DESCANSAR"
+            );
+        }
+
+        if (string.Equals(category, CategoryNaturalFeatures, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryNaturalFeatures,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionExploration,
+                IsBossSpecial: false,
+                InteractionHint: "Vasculhe o local em busca de itens ou moedas deixados pela natureza.",
+                ActionLabel: "VASCULHAR LOCAL"
+            );
+        }
+
+        if (string.Equals(category, CategoryTransportation, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryTransportation,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionTransport,
+                IsBossSpecial: false,
+                InteractionHint: "Terminal de transporte para viajar diretamente a outros pontos do mesmo tipo.",
+                ActionLabel: "VER LOCALIZAÇÕES PRÓXIMAS"
+            );
+        }
+
+        if (string.Equals(category, CategoryCulture, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategoryCulture,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionCulture,
+                IsBossSpecial: false,
+                InteractionHint: "Espaço cultural onde é possível adquirir um buff aleatório gratuito.",
+                ActionLabel: "RECEBER BUFF"
+            );
+        }
+
+        if (string.Equals(category, CategorySports, StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaceClassificationResult(
+                Category: CategorySports,
+                Subcategory: subcategory,
+                PlaceFunction: FunctionSports,
+                IsBossSpecial: false,
+                InteractionHint: "Local de treino esportivo que concede uma melhoria permanente de atributo.",
+                ActionLabel: "TREINAR"
             );
         }
 

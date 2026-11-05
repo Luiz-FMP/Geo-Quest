@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { getItemPlaceholder } from "../config/placeholderAssets";
 import {
   ALLOWED_CATEGORIES,
+  getNaturalFeatureFlavorText,
+  getTranslatedSubcategory,
   PLACE_FUNCTIONS,
   SPECIAL_HOSPITAL_SUBCATEGORY,
 } from "../utils/placeCategories";
@@ -20,6 +23,41 @@ const DISABLED_GRAY_BUTTON_STYLE = {
   opacity: 0.85,
 };
 
+const SPORTS_UPGRADE_OPTIONS = [
+  {
+    key: "dano",
+    label: "Upar dano",
+    detail: "+1 de dano",
+    accent: "#EF4444",
+    border: "#FCA5A5",
+  },
+  {
+    key: "vida",
+    label: "Upar vida",
+    detail: "+5 de vida máxima",
+    accent: "#10B981",
+    border: "#6EE7B7",
+  },
+  {
+    key: "energia",
+    label: "Upar energia",
+    detail: "+10 de energia máxima",
+    accent: "#0284C7",
+    border: "#7DD3FC",
+  },
+  {
+    key: "velocidade",
+    label: "Upar velocidade",
+    detail: "+1 de velocidade",
+    accent: "#D97706",
+    border: "#FCD34D",
+  },
+];
+
+function createInteractionId(placeId) {
+  return `${placeId || "place"}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
 export default function PlaceArrivalModal({
   place,
   routeSummary,
@@ -34,6 +72,9 @@ export default function PlaceArrivalModal({
   onHospitalHeal,
   onLodgingRest,
   onHomeRest,
+  onExploreNaturalFeature,
+  onOpenTransportMap,
+  onTrainSports,
   onClose,
 }) {
   const [actionFeedback, setActionFeedback] = useState(null);
@@ -41,11 +82,26 @@ export default function PlaceArrivalModal({
   const [isBusy, setIsBusy] = useState(false);
   const [prevContextKey, setPrevContextKey] = useState(null);
 
+  // Estados locais por interação com o Place (Natural Features, Culture, Sports, Services)
+  const [interactionId, setInteractionId] = useState(() =>
+    createInteractionId(place?.id),
+  );
+  const [naturalExplorationResult, setNaturalExplorationResult] =
+    useState(null);
+  const [cultureBuffAcquired, setCultureBuffAcquired] = useState(false);
+  const [sportsTrainedOption, setSportsTrainedOption] = useState(null);
+  const [servicesWipTriggered, setServicesWipTriggered] = useState(false);
+
   const currentContextKey = `${place?.id || "none"}:${hasArrived ? "arrived" : "preview"}`;
   if (currentContextKey !== prevContextKey) {
     setPrevContextKey(currentContextKey);
+    setInteractionId(createInteractionId(place?.id));
     if (actionError !== null) setActionError(null);
     if (actionFeedback !== null) setActionFeedback(null);
+    if (naturalExplorationResult !== null) setNaturalExplorationResult(null);
+    if (cultureBuffAcquired) setCultureBuffAcquired(false);
+    if (sportsTrainedOption !== null) setSportsTrainedOption(null);
+    if (servicesWipTriggered) setServicesWipTriggered(false);
   }
 
   if (!place) return null;
@@ -67,11 +123,22 @@ export default function PlaceArrivalModal({
     (place.placeFunction === PLACE_FUNCTIONS.ARENA ||
       place.category === ALLOWED_CATEGORIES.ENTERTAINMENT);
 
-  const isShop =
+  const isEquipmentShop =
     !isHomeSpecial &&
     !isBossSpecial &&
-    (place.placeFunction === PLACE_FUNCTIONS.SHOP ||
-      place.category === ALLOWED_CATEGORIES.SHOPPING);
+    place.category === ALLOWED_CATEGORIES.SHOPPING;
+
+  const isConsumableShop =
+    !isHomeSpecial &&
+    !isBossSpecial &&
+    place.category === ALLOWED_CATEGORIES.FOOD_AND_DRINK;
+
+  const isServicesBuffShop =
+    !isHomeSpecial &&
+    !isBossSpecial &&
+    place.category === ALLOWED_CATEGORIES.SERVICES;
+
+  const isShop = isEquipmentShop || isConsumableShop;
 
   const isHospital =
     !isHomeSpecial &&
@@ -88,7 +155,24 @@ export default function PlaceArrivalModal({
     (place.placeFunction === PLACE_FUNCTIONS.LODGING ||
       place.category === ALLOWED_CATEGORIES.LODGING);
 
-  // Estado permanente persistido para este Place (Seção 5.2, 6, 11)
+  const isNaturalFeature =
+    !isHomeSpecial && place.category === ALLOWED_CATEGORIES.NATURAL_FEATURES;
+
+  const isTransportation =
+    !isHomeSpecial && place.category === ALLOWED_CATEGORIES.TRANSPORTATION;
+
+  const isCulture =
+    !isHomeSpecial && place.category === ALLOWED_CATEGORIES.CULTURE;
+
+  const isSports =
+    !isHomeSpecial && place.category === ALLOWED_CATEGORIES.SPORTS;
+
+  const translatedSubcategory = getTranslatedSubcategory(
+    place.subcategory,
+    place.category,
+  );
+
+  // Estado permanente persistido para este Place
   const permanentState = (playerState?.estadosPlaces || []).find(
     (e) => e.placeId === place.id,
   );
@@ -106,26 +190,38 @@ export default function PlaceArrivalModal({
   );
   const moedas = playerState?.moedas ?? playerState?.atributos?.moedas ?? 0;
 
+  // Seção 4.3: Em Natural Features, após vasculhar, a descrição inicial é substituída pelo texto narrativo de resultado
   const descriptionText = isHomeSpecial
     ? "Seu ponto inicial de aventura."
     : isBossSpecial
       ? "Local especial de Boss. Enfrente o Boss deste território em combate."
       : isArena
         ? "Este local permite enfrentar desafios de combate em uma arena."
-        : isShop
-          ? "Explore esta loja e confira os produtos disponíveis."
-          : isHospital
-            ? "Este local permite recuperar sua Vida e funciona como checkpoint caso você seja derrotado."
-            : isLodging
-              ? "Este local permite recuperar sua Energia e funciona como checkpoint caso você fique exausto."
-              : "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.";
+        : isEquipmentShop
+          ? "Loja de equipamentos. Confira a vitrine preparada para futuros equipamentos e consulte seu inventário de equipamentos."
+          : isConsumableShop
+            ? "Loja de consumíveis. Confira a vitrine preparada para futuros consumíveis e consulte seu inventário de consumíveis."
+            : isServicesBuffShop
+              ? "Estabelecimento de serviços que oferece aprimoramentos temporários (buffs) para sua jornada."
+              : isHospital
+                ? "Este local permite recuperar sua Vida e funciona como checkpoint caso você seja derrotado."
+                : isLodging
+                  ? "Este local permite recuperar sua Energia e funciona como checkpoint caso você fique exausto."
+                  : isNaturalFeature
+                    ? naturalExplorationResult?.mensagem ||
+                      getNaturalFeatureFlavorText(place.subcategory)
+                    : isTransportation
+                      ? `Terminal de transporte (${translatedSubcategory}). Viaje diretamente para outros pontos de ${translatedSubcategory.toLowerCase()} próximos no mapa de transporte.`
+                      : isCulture
+                        ? "Espaço cultural que inspira o explorador e concede um aprimoramento cultural temporário (buff)."
+                        : isSports
+                          ? "Local de prática esportiva e treinamento físico. Escolha um atributo base para aprimorar permanentemente nesta visita."
+                          : "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.";
 
   const requiredEnergy = Number(routeSummary?.energiaConsumida ?? 0);
   const distanceKm = Number(routeSummary?.distanciaKm ?? 0);
   const hasEnoughEnergy = energiaAtual > 0 && energiaAtual >= requiredEnergy;
 
-  // Permite clicar em IR quando o personagem ainda não está no local e tem Energia > 0
-  // (Se energiaAtual <= 0, o botão IR fica cinza; se 0 < energiaAtual < requiredEnergy, ao caminhar a Energia chegará a 0 no meio da rota acionando o Esgotamento da Seção 3.1)
   const canClickGo = !hasArrived && !isCalculatingRoute && energiaAtual > 0;
 
   const goButtonLabel = hasArrived
@@ -140,11 +236,12 @@ export default function PlaceArrivalModal({
 
   const freeHealPct = isGeneralHospital ? 50 : 25;
   const paidHealPct = isGeneralHospital ? 100 : 50;
-  const freeHealAmount = Math.max(1, Math.round(vidaFinal * (freeHealPct / 100)));
+  const freeHealAmount = Math.max(
+    1,
+    Math.round(vidaFinal * (freeHealPct / 100)),
+  );
   const paidHealAmount =
-    paidHealPct === 100
-      ? vidaFinal
-      : Math.max(1, Math.round(vidaFinal * 0.5));
+    paidHealPct === 100 ? vidaFinal : Math.max(1, Math.round(vidaFinal * 0.5));
 
   async function handleHospitalCure(tipoCura) {
     if (!hasArrived || isBusy || !onHospitalHeal) return;
@@ -203,6 +300,86 @@ export default function PlaceArrivalModal({
     }
   }
 
+  // Seção 3.3: Services — Loja de buffs (50g, estado WIP, sem descontar moedas nem alterar atributos)
+  function handleBuyServicesBuff() {
+    if (!hasArrived || isBusy) return;
+    setActionError(null);
+    setServicesWipTriggered(true);
+    setActionFeedback(
+      "WIP — O sistema de aprimoramentos temporários (buffs) ainda está em desenvolvimento. Nenhuma moeda foi descontada (custo previsto: 50g) e nenhum atributo foi alterado.",
+    );
+  }
+
+  // Seção 4: Natural Features — Vasculhar local (calculado e persistido no backend)
+  async function handleScavengeNaturalFeature() {
+    if (
+      !hasArrived ||
+      isBusy ||
+      naturalExplorationResult !== null ||
+      !onExploreNaturalFeature
+    ) {
+      return;
+    }
+    setActionError(null);
+    setActionFeedback(null);
+    setIsBusy(true);
+    try {
+      const response = await onExploreNaturalFeature(place, interactionId);
+      setNaturalExplorationResult(response);
+    } catch (err) {
+      setActionError(
+        err?.message || "Não foi possível vasculhar este local agora.",
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  // Seção 5: Transportation — Abrir mapa alternativo de transporte
+  function handleOpenTransportMode() {
+    if (!hasArrived || isBusy || !onOpenTransportMap) return;
+    setActionError(null);
+    setActionFeedback(null);
+    onOpenTransportMap(place);
+  }
+
+  // Seção 6: Culture — Receber buff (quadrado vazio, nome "Nada", descrição "WIP")
+  function handleReceiveCultureBuff() {
+    if (!hasArrived || isBusy) return;
+    setActionError(null);
+    setActionFeedback(null);
+    setCultureBuffAcquired(true);
+  }
+
+  // Seção 7: Sports — Treinar 1 atributo permanente por interação com o Place
+  async function handleSelectSportsUpgrade(optionKey) {
+    if (
+      !hasArrived ||
+      isBusy ||
+      sportsTrainedOption !== null ||
+      !onTrainSports
+    ) {
+      return;
+    }
+    setActionError(null);
+    setActionFeedback(null);
+    setIsBusy(true);
+    try {
+      const response = await onTrainSports(place, optionKey, interactionId);
+      setSportsTrainedOption(optionKey);
+      setActionFeedback(
+        response?.mensagem ||
+          "Treinamento concluído! Atributo permanente aprimorado.",
+      );
+    } catch (err) {
+      setActionError(
+        err?.message || "Não foi possível concluir o treinamento neste local.",
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   function handleCombatOrShopClick() {
     setActionError(null);
     setActionFeedback(null);
@@ -233,6 +410,13 @@ export default function PlaceArrivalModal({
     }
   }
 
+  const foundItemVisual = naturalExplorationResult?.itemEncontrado
+    ? getItemPlaceholder(
+        naturalExplorationResult.itemEncontrado.placeholderKey ||
+          "debug_cube_magenta",
+      )
+    : getItemPlaceholder("debug_cube_magenta");
+
   return (
     <div
       role="dialog"
@@ -260,7 +444,7 @@ export default function PlaceArrivalModal({
                 ? "#F59E0B"
                 : isArena
                   ? "#EF4444"
-                  : "#C89B5C"
+                  : place.color || "#C89B5C"
           }`,
           borderRadius: 12,
           maxWidth: 460,
@@ -297,12 +481,12 @@ export default function PlaceArrivalModal({
           ✕
         </button>
 
-        {/* 1. Nome do Place */}
+        {/* 1. Nome original do Place */}
         <h3
           id="place-modal-title"
           data-testid="place-menu-name"
           style={{
-            margin: "0 32px 12px 0",
+            margin: "0 32px 4px 0",
             fontSize: 22,
             fontWeight: 700,
             color: "#EDE6D3",
@@ -311,6 +495,22 @@ export default function PlaceArrivalModal({
         >
           {place.name}
         </h3>
+
+        {/* Nome traduzido e simplificado da subcategoria em tamanho menor (sem expor identificador técnico) */}
+        {!isHomeSpecial && translatedSubcategory && (
+          <div
+            data-testid="place-menu-subcategory"
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              fontWeight: 600,
+              color: place.color || "#C89B5C",
+              marginBottom: 10,
+            }}
+          >
+            {translatedSubcategory}
+          </div>
+        )}
 
         {/* 2. Categoria e badges especiais */}
         <div
@@ -352,7 +552,7 @@ export default function PlaceArrivalModal({
                 color: "#6EE7B7",
               }}
             >
-              General Hospital (general_hospital)
+              Hospital Geral
             </div>
           )}
 
@@ -371,7 +571,7 @@ export default function PlaceArrivalModal({
                 color: "#FCD34D",
               }}
             >
-              Local Especial de Boss (shopping_mall)
+              Local Especial de Boss
             </div>
           )}
 
@@ -407,12 +607,13 @@ export default function PlaceArrivalModal({
                 color: !hasEnoughEnergy ? "#FCA5A5" : "#38BDF8",
               }}
             >
-              {distanceKm.toFixed(2)} km • Custo: {requiredEnergy.toFixed(2)} Energia
+              {distanceKm.toFixed(2)} km • Custo: {requiredEnergy.toFixed(2)}{" "}
+              Energia
             </div>
           )}
         </div>
 
-        {/* 3. Breve descrição da função daquele tipo de local no jogo */}
+        {/* 3. Descrição / Flavor / Resultado Narrativo */}
         <div
           data-testid="place-menu-description"
           style={{
@@ -422,13 +623,282 @@ export default function PlaceArrivalModal({
             borderRadius: 8,
             fontFamily: "'IBM Plex Mono', monospace",
             fontSize: 12,
-            color: "#9CAEA0",
+            color: naturalExplorationResult ? "#EDE6D3" : "#9CAEA0",
             marginBottom: 14,
             lineHeight: 1.5,
           }}
         >
           {descriptionText}
         </div>
+
+        {/* Seção 3.3: Painel estilo hospedagem para Services (Loja de Buffs) */}
+        {isServicesBuffShop && (
+          <div
+            data-testid="services-status-panel"
+            style={{
+              padding: "10px 12px",
+              background: "#131D17",
+              border: "1px solid #26332A",
+              borderRadius: 8,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 11,
+              color: "#EDE6D3",
+              marginBottom: 14,
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div>
+              Saldo atual:{" "}
+              <strong style={{ color: "#FBBF24" }}>Moedas: {moedas}g</strong>
+            </div>
+            <div>
+              Serviço: <strong>Aprimoramento temporário (Buff)</strong> • Custo:{" "}
+              <strong style={{ color: "#C4B5FD" }}>50 moedas (50g)</strong>
+            </div>
+            {servicesWipTriggered && (
+              <div
+                data-testid="services-wip-badge"
+                style={{ color: "#FBBF24", fontWeight: 700, marginTop: 2 }}
+              >
+                Estado: WIP — Sistema de buffs em desenvolvimento.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Seção 4.3: Apresentação visual do resultado da exploração em Natural Features */}
+        {isNaturalFeature && naturalExplorationResult && (
+          <div
+            data-testid="natural-feature-result-panel"
+            data-result-type={
+              naturalExplorationResult.resultado ||
+              naturalExplorationResult.tipoResultado
+            }
+            style={{
+              padding: "14px",
+              background: "#131D17",
+              border: "1px solid #22C55E",
+              borderRadius: 10,
+              marginBottom: 14,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+              textAlign: "center",
+            }}
+          >
+            {(naturalExplorationResult.resultado ||
+              naturalExplorationResult.tipoResultado) === "item" && (
+              <>
+                <span
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 11,
+                    color: "#86EFAC",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                  }}
+                >
+                  Item Encontrado!
+                </span>
+                {/* Quadrado destacado na tela preparado para receber futuramente os assets dos itens */}
+                <div
+                  data-testid="natural-feature-item-box"
+                  style={{
+                    width: 88,
+                    height: 88,
+                    background: "#171F19",
+                    border: "2px solid #C89B5C",
+                    boxShadow: "0 0 18px rgba(200, 155, 92, 0.35)",
+                    borderRadius: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 4,
+                    padding: 8,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 28,
+                      color: foundItemVisual.accent || "#D946EF",
+                      lineHeight: 1,
+                    }}
+                  >
+                    {foundItemVisual.symbol}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#EDE6D3",
+                    }}
+                  >
+                    {foundItemVisual.code}
+                  </span>
+                </div>
+                <div
+                  data-testid="natural-feature-item-name"
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#EDE6D3",
+                  }}
+                >
+                  {naturalExplorationResult.itemEncontrado?.nome ||
+                    "Item de Debug"}
+                </div>
+              </>
+            )}
+
+            {(naturalExplorationResult.resultado ||
+              naturalExplorationResult.tipoResultado) === "moedas" && (
+              <div
+                data-testid="natural-feature-coins-reward"
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "#FBBF24",
+                  padding: "6px 14px",
+                  background: "rgba(251, 191, 36, 0.12)",
+                  border: "1px solid #FBBF24",
+                  borderRadius: 8,
+                }}
+              >
+                +{naturalExplorationResult.moedasGanhas || 10}g adicionados ao
+                saldo! (Total: {moedas}g)
+              </div>
+            )}
+
+            {(naturalExplorationResult.resultado ||
+              naturalExplorationResult.tipoResultado) === "nada" && (
+              <div
+                data-testid="natural-feature-empty-reward"
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12,
+                  color: "#9CAEA0",
+                }}
+              >
+                Nenhuma recompensa encontrada nesta busca.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Seção 6.2: Visualização de buff adquirido em Culture (quadrado vazio, Nome: Nada, Descrição: WIP) */}
+        {isCulture && cultureBuffAcquired && (
+          <div
+            data-testid="culture-buff-result-panel"
+            style={{
+              padding: "16px",
+              background: "#131D17",
+              border: "1px solid #F43F5E",
+              borderRadius: 10,
+              marginBottom: 14,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+              textAlign: "center",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11,
+                color: "#FDA4AF",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 700,
+              }}
+            >
+              Buff Adquirido
+            </span>
+
+            {/* Quadrado destacado reservado para o asset do buff — deve permanecer VAZIO */}
+            <div
+              data-testid="culture-buff-empty-square"
+              style={{
+                width: 84,
+                height: 84,
+                background: "#171F19",
+                border: "2px solid #F43F5E",
+                boxShadow: "0 0 16px rgba(244, 63, 94, 0.28)",
+                borderRadius: 10,
+              }}
+            />
+
+            <div
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 14,
+                color: "#EDE6D3",
+              }}
+            >
+              Nome:{" "}
+              <strong data-testid="culture-buff-name" style={{ color: "#FFFFFF" }}>
+                Nada
+              </strong>
+            </div>
+
+            <div
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 12,
+                color: "#9CAEA0",
+              }}
+            >
+              Descrição:{" "}
+              <strong
+                data-testid="culture-buff-description"
+                style={{ color: "#FCD34D" }}
+              >
+                WIP
+              </strong>
+            </div>
+          </div>
+        )}
+
+        {/* Seção 7: Painel informativo de atributos atuais em Sports */}
+        {isSports && (
+          <div
+            data-testid="sports-status-panel"
+            style={{
+              padding: "10px 12px",
+              background: "#131D17",
+              border: "1px solid #26332A",
+              borderRadius: 8,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 11,
+              color: "#EDE6D3",
+              marginBottom: 14,
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div>
+              Atributos atuais:{" "}
+              <strong>Dano {playerState?.atributos?.danoFinal ?? 10}</strong> •{" "}
+              <strong>Vida Máx. {vidaFinal}</strong> •{" "}
+              <strong>Energia Máx. {energiaMaxima}</strong> •{" "}
+              <strong>
+                Velocidade {playerState?.atributos?.velocidadeFinal ?? 0}
+              </strong>
+            </div>
+            <div style={{ color: "#9CAEA0" }}>
+              Escolha apenas 1 aprimoramento permanente por visita a este local.
+            </div>
+          </div>
+        )}
 
         {/* Informações adicionais de estado para Health and Wellness, Lodging, Home ou Locais Concluídos */}
         {isHospital && (
@@ -534,7 +1004,8 @@ export default function PlaceArrivalModal({
               </strong>
             </div>
             <div>
-              Recuperação: <strong>+50% da Vida total e 100% da Energia (Grátis)</strong>
+              Recuperação:{" "}
+              <strong>+50% da Vida total e 100% da Energia (Grátis)</strong>
             </div>
           </div>
         )}
@@ -597,9 +1068,7 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* 4. Botões na parte inferior:
-             - Botão superior: IR para o Place
-             - Botão(ões) inferior(es): Ação do próprio Place (fica cinza até o personagem chegar lá) */}
+        {/* 4. Botões na parte inferior */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button
             type="button"
@@ -632,7 +1101,7 @@ export default function PlaceArrivalModal({
             {goButtonLabel}
           </button>
 
-          {/* Ações específicas de Health and Wellness (Seção 7) */}
+          {/* Ações específicas de Health and Wellness */}
           {isHospital ? (
             <>
               <button
@@ -690,7 +1159,7 @@ export default function PlaceArrivalModal({
               </button>
             </>
           ) : isLodging ? (
-            /* Ação específica de Lodging (Seção 8) */
+            /* Ação específica de Lodging */
             <button
               type="button"
               data-testid="place-action-lodging-rest"
@@ -717,7 +1186,7 @@ export default function PlaceArrivalModal({
               DESCANSAR (100% ENERGIA • 25 MOEDAS)
             </button>
           ) : isHomeSpecial ? (
-            /* Ação específica de Home (Seção 9.3) */
+            /* Ação específica de Home */
             <button
               type="button"
               data-testid="place-action-home-rest"
@@ -743,8 +1212,186 @@ export default function PlaceArrivalModal({
             >
               DESCANSAR GRATUITAMENTE
             </button>
+          ) : isServicesBuffShop ? (
+            /* Seção 3.3: Services — Loja de buffs (50g, estado WIP) */
+            <button
+              type="button"
+              data-testid="place-action-services-buff"
+              disabled={!hasArrived || isBusy}
+              onClick={handleBuyServicesBuff}
+              style={
+                hasArrived && !isBusy
+                  ? {
+                      width: "100%",
+                      padding: "12px 18px",
+                      background: "#6D28D9",
+                      border: "1px solid #C4B5FD",
+                      borderRadius: 6,
+                      color: "#FFFFFF",
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      letterSpacing: "0.05em",
+                      cursor: "pointer",
+                    }
+                  : DISABLED_GRAY_BUTTON_STYLE
+              }
+            >
+              COMPRAR APRIMORAMENTO TEMPORÁRIO (50g)
+            </button>
+          ) : isNaturalFeature ? (
+            /* Seção 4: Natural Features — Botão VASCULHAR LOCAL */
+            <button
+              type="button"
+              data-testid="place-action-scavenge"
+              disabled={
+                !hasArrived || isBusy || naturalExplorationResult !== null
+              }
+              onClick={handleScavengeNaturalFeature}
+              style={
+                hasArrived && !isBusy && naturalExplorationResult === null
+                  ? {
+                      width: "100%",
+                      padding: "12px 18px",
+                      background: "#15803D",
+                      border: "1px solid #86EFAC",
+                      borderRadius: 6,
+                      color: "#FFFFFF",
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      letterSpacing: "0.06em",
+                      cursor: "pointer",
+                    }
+                  : DISABLED_GRAY_BUTTON_STYLE
+              }
+            >
+              {isBusy
+                ? "VASCULHANDO LOCAL..."
+                : naturalExplorationResult !== null
+                  ? "LOCAL VASCULHADO"
+                  : "VASCULHAR LOCAL"}
+            </button>
+          ) : isTransportation ? (
+            /* Seção 5.1: Transportation — Botão VER LOCALIZAÇÕES PRÓXIMAS */
+            <button
+              type="button"
+              data-testid="place-action-transport-map"
+              disabled={!hasArrived || isBusy}
+              onClick={handleOpenTransportMode}
+              style={
+                hasArrived && !isBusy
+                  ? {
+                      width: "100%",
+                      padding: "12px 18px",
+                      background: "#1D4ED8",
+                      border: "1px solid #93C5FD",
+                      borderRadius: 6,
+                      color: "#FFFFFF",
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      letterSpacing: "0.05em",
+                      cursor: "pointer",
+                    }
+                  : DISABLED_GRAY_BUTTON_STYLE
+              }
+            >
+              VER LOCALIZAÇÕES PRÓXIMAS
+            </button>
+          ) : isCulture ? (
+            /* Seção 6.1: Culture — Botão para receber o buff */
+            <button
+              type="button"
+              data-testid="place-action-culture-buff"
+              disabled={!hasArrived || isBusy || cultureBuffAcquired}
+              onClick={handleReceiveCultureBuff}
+              style={
+                hasArrived && !isBusy && !cultureBuffAcquired
+                  ? {
+                      width: "100%",
+                      padding: "12px 18px",
+                      background: "#BE123C",
+                      border: "1px solid #FDA4AF",
+                      borderRadius: 6,
+                      color: "#FFFFFF",
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      letterSpacing: "0.05em",
+                      cursor: "pointer",
+                    }
+                  : DISABLED_GRAY_BUTTON_STYLE
+              }
+            >
+              {cultureBuffAcquired ? "BUFF RECEBIDO (WIP)" : "RECEBER BUFF"}
+            </button>
+          ) : isSports ? (
+            /* Seção 7.1 e 7.2: Sports — 4 opções de aprimoramento permanente (apenas 1 escolha por interação) */
+            <div
+              data-testid="sports-upgrade-options-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+              }}
+            >
+              {SPORTS_UPGRADE_OPTIONS.map((opt) => {
+                const isSelectedOption = sportsTrainedOption === opt.key;
+                const canSelect =
+                  hasArrived && !isBusy && sportsTrainedOption === null;
+
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    data-testid={`sports-upgrade-${opt.key}`}
+                    disabled={!canSelect}
+                    onClick={() => handleSelectSportsUpgrade(opt.key)}
+                    style={
+                      canSelect
+                        ? {
+                            padding: "10px 10px",
+                            background: opt.accent,
+                            border: `1px solid ${opt.border}`,
+                            borderRadius: 6,
+                            color: "#FFFFFF",
+                            fontFamily: "'IBM Plex Mono', monospace",
+                            fontWeight: 700,
+                            fontSize: 12,
+                            cursor: "pointer",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 2,
+                          }
+                        : {
+                            ...DISABLED_GRAY_BUTTON_STYLE,
+                            padding: "10px 10px",
+                            fontSize: 12,
+                            border: isSelectedOption
+                              ? "2px solid #22C55E"
+                              : "1px solid #3E4641",
+                            color: isSelectedOption ? "#86EFAC" : "#7B857E",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 2,
+                          }
+                    }
+                  >
+                    <span>{opt.label}</span>
+                    <span style={{ fontSize: 10, opacity: 0.9 }}>
+                      ({opt.detail})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           ) : (
-            /* Ação para Arena, Boss, Loja ou Categorias WIP */
+            /* Ação para Arena, Boss, Loja (Shopping e Food and Drink) ou Categorias WIP */
             <button
               type="button"
               data-testid={
@@ -818,9 +1465,11 @@ export default function PlaceArrivalModal({
                   ? isPlaceCompleted
                     ? "ARENA CONCLUÍDA"
                     : "COMBATE"
-                  : isShop
-                    ? "LOJA"
-                    : "EM DESENVOLVIMENTO"}
+                  : isEquipmentShop
+                    ? "LOJA DE EQUIPAMENTOS"
+                    : isConsumableShop
+                      ? "LOJA DE CONSUMÍVEIS"
+                      : "EM DESENVOLVIMENTO"}
             </button>
           )}
         </div>

@@ -1178,3 +1178,374 @@ export async function fetchBossesDisponiveis() {
   }
   return DEFAULT_BOSSES;
 }
+
+
+const localProcessedExplorations = new Map();
+const localProcessedSportsInteractions = new Set();
+
+function selectNaturalExplorationRewardCategory(roll) {
+  if (roll < 0.5) return "item";
+  if (roll < 0.75) return "moedas";
+  return "nada";
+}
+
+export function calcularCustoViagemTransporte(distanciaKm) {
+  const dist = Number(distanciaKm);
+  if (!Number.isFinite(dist) || dist <= 0) return 0;
+  // Seção 5.5: distancia_km * 10 convertido em moedas (g), sem modificador de velocidade.
+  // Arredondamento: Math.round (meio para cima) com mínimo de 1g para viagens com distância > 0.
+  return Math.max(1, Math.round(dist * 10));
+}
+
+export async function vasculharNaturalFeatureJogador({
+  placeId,
+  nome,
+  subcategoria = "woods",
+  latitude = 0,
+  longitude = 0,
+  interacaoId = null,
+}) {
+  const dedupKey =
+    placeId && interacaoId ? `${placeId}:${interacaoId}` : null;
+  if (dedupKey && localProcessedExplorations.has(dedupKey)) {
+    return localProcessedExplorations.get(dedupKey);
+  }
+
+  try {
+    const response = await requestApi(
+      "/api/jogadores/atual/natural-features/vasculhar",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          placeId,
+          nome,
+          subcategoria,
+          latitude,
+          longitude,
+          interacaoId,
+        }),
+      },
+    );
+    if (response && !response.resultado && response.tipoResultado) {
+      response.resultado = response.tipoResultado;
+    }
+    if (response?.jogador) {
+      response.jogador = saveLocalState(response.jogador);
+    }
+    if (dedupKey && response) {
+      localProcessedExplorations.set(dedupKey, response);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+
+    const local = getOrCreateLocalState();
+    const tipoResultado = selectNaturalExplorationRewardCategory(Math.random());
+    let mensagem =
+      "Você procura cuidadosamente pela região, mas não encontra nada de interessante.";
+    let moedasGanhas = 0;
+    let itemEncontrado = null;
+
+    if (tipoResultado === "item") {
+      const occupied = new Set(
+        local.mochila
+          .filter((i) => (i.categoriaAba || i.categoria) === "Equipavel")
+          .map((i) => i.slotIndice),
+      );
+      let freeSlot = null;
+      for (let s = 0; s < 50; s++) {
+        if (!occupied.has(s)) {
+          freeSlot = s;
+          break;
+        }
+      }
+      const nextId =
+        local.mochila.reduce(
+          (max, i) => Math.max(max, i.inventarioId || 0),
+          0,
+        ) + 1;
+      const debugItem = createDebugItemInstance(nextId, freeSlot ?? 0);
+      if (freeSlot !== null) {
+        local.mochila.push(debugItem);
+        local.estatisticas.itensObtidos =
+          (local.estatisticas.itensObtidos || 0) + 1;
+      }
+      itemEncontrado = debugItem;
+      mensagem =
+        "Você investiga cuidadosamente os arredores e encontra um objeto curioso escondido na natureza!";
+    } else if (tipoResultado === "moedas") {
+      moedasGanhas = 10;
+      local.moedas = Math.max(0, (local.moedas ?? 0) + 10);
+      local.atributos.moedas = local.moedas;
+      mensagem =
+        "Você vê algo brilhando entre as pedras. Ao investigar, encontra 10g!";
+    }
+
+    if (latitude || longitude) {
+      local.posicaoAtualLatitude = latitude;
+      local.posicaoAtualLongitude = longitude;
+    }
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome: nome || "Local Natural",
+      categoria: "Natural Features",
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao: `Vasculhado (${tipoResultado})`,
+    });
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    const saved = saveLocalState(local);
+    const fallbackResponse = {
+      tipoResultado,
+      resultado: tipoResultado,
+      mensagem,
+      moedasGanhas,
+      itemEncontrado,
+      jogador: saved,
+    };
+    if (dedupKey) {
+      localProcessedExplorations.set(dedupKey, fallbackResponse);
+    }
+    return fallbackResponse;
+  }
+}
+
+export async function buscarDestinosTransporte({
+  lat,
+  lng,
+  type,
+  excludePlaceId = null,
+}) {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+    type: String(type || "").trim().toLowerCase(),
+  });
+  if (excludePlaceId) {
+    params.set("excludePlaceId", String(excludePlaceId));
+  }
+  return await requestApi(
+    `/api/places/transport-destinations?${params.toString()}`,
+    { method: "GET" },
+  );
+}
+
+export async function viajarTransporteJogador({
+  origemPlaceId = null,
+  origemNome = null,
+  origemSubcategoria = null,
+  destinoPlaceId,
+  destinoNome,
+  subcategoria = null,
+  destinoSubcategoria = null,
+  origemLatitude = 0,
+  origemLongitude = 0,
+  destinoLatitude = 0,
+  destinoLongitude = 0,
+  distanciaKm = null,
+}) {
+  const rawSub = String(
+    subcategoria || destinoSubcategoria || origemSubcategoria || "",
+  )
+    .trim()
+    .toLowerCase();
+  const normalizedSub =
+    rawSub === "airport" ||
+    rawSub === "international_airport" ||
+    rawSub === "airstrip" ||
+    rawSub === "heliport"
+      ? "airport"
+      : "bus_station";
+
+  try {
+    const response = await requestApi(
+      "/api/jogadores/atual/transporte/viajar",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          origemPlaceId,
+          origemNome,
+          origemSubcategoria: normalizedSub,
+          destinoPlaceId,
+          destinoNome,
+          subcategoria: normalizedSub,
+          destinoSubcategoria: normalizedSub,
+          origemLatitude,
+          origemLongitude,
+          destinoLatitude,
+          destinoLongitude,
+          distanciaKm,
+        }),
+      },
+    );
+    if (response?.jogador) {
+      response.jogador = saveLocalState(response.jogador);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+
+    const local = getOrCreateLocalState();
+    if (normalizedSub !== "airport" && normalizedSub !== "bus_station") {
+      throw new Error(
+        "Tipo de transporte não suportado. Apenas aeroportos e estações de ônibus são permitidos.",
+        { cause: err },
+      );
+    }
+
+    const safeDistKm = Math.max(0.05, Number(Number(distanciaKm || 0).toFixed(3)));
+    const custoMoedas = calcularCustoViagemTransporte(safeDistKm);
+    const saldoAtual = local.moedas ?? local.atributos?.moedas ?? 0;
+
+    if (saldoAtual < custoMoedas) {
+      throw new Error(
+        `Você não possui moedas suficientes para esta viagem. Custo: ${custoMoedas}g (Saldo atual: ${saldoAtual}g).`,
+        { cause: err },
+      );
+    }
+
+    local.moedas = Math.max(0, saldoAtual - custoMoedas);
+    local.atributos.moedas = local.moedas;
+    local.posicaoAtualLatitude = Number(Number(destinoLatitude).toFixed(6));
+    local.posicaoAtualLongitude = Number(Number(destinoLongitude).toFixed(6));
+
+    local.estatisticas.distanciaPercorridaKm = Number(
+      ((local.estatisticas.distanciaPercorridaKm || 0) + safeDistKm).toFixed(3),
+    );
+    local.estatisticas.placesVisitados =
+      (local.estatisticas.placesVisitados || 0) + 1;
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId: destinoPlaceId,
+      nome: destinoNome || "Terminal de Transporte",
+      categoria: "Transportation",
+      subcategoria: normalizedSub,
+      latitude: destinoLatitude,
+      longitude: destinoLongitude,
+      estadoInteracao: `Viagem concluída (-${custoMoedas}g)`,
+    });
+
+    const saved = saveLocalState(local);
+    return {
+      destinoPlaceId,
+      destinoNome,
+      subcategoria: normalizedSub,
+      latitude: local.posicaoAtualLatitude,
+      longitude: local.posicaoAtualLongitude,
+      distanciaKm: safeDistKm,
+      custoMoedas,
+      jogador: saved,
+    };
+  }
+}
+
+export async function treinarSportsJogador({
+  placeId,
+  nome,
+  subcategoria = "gym",
+  latitude = 0,
+  longitude = 0,
+  opcaoAtributo = null,
+  opcao = null,
+  interacaoId = null,
+}) {
+  const normalizedOption = String(opcaoAtributo || opcao || "")
+    .trim()
+    .toLowerCase();
+  const dedupKey =
+    placeId && interacaoId ? `${placeId}:${interacaoId}` : null;
+
+  if (dedupKey && localProcessedSportsInteractions.has(dedupKey)) {
+    throw new Error(
+      "Você já escolheu uma melhoria de atributo nesta interação com o local.",
+    );
+  }
+
+  try {
+    const response = await requestApi("/api/jogadores/atual/sports/treinar", {
+      method: "POST",
+      body: JSON.stringify({
+        placeId,
+        nome,
+        subcategoria,
+        latitude,
+        longitude,
+        opcaoAtributo: normalizedOption,
+        opcao: normalizedOption,
+        interacaoId,
+      }),
+    });
+    if (response?.jogador) {
+      response.jogador = saveLocalState(response.jogador);
+    }
+    if (dedupKey) {
+      localProcessedSportsInteractions.add(dedupKey);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+
+    const local = getOrCreateLocalState();
+    let incrementoAplicado;
+    let mensagem;
+
+    if (normalizedOption === "dano") {
+      incrementoAplicado = 1;
+      local.atributos.danoBase = (local.atributos?.danoBase ?? 10) + 1;
+      mensagem = "Treino concluído: +1 de Dano permanente aplicado!";
+    } else if (normalizedOption === "vida") {
+      incrementoAplicado = 5;
+      local.atributos.vidaBase = (local.atributos?.vidaBase ?? 50) + 5;
+      // Regra 7.2: Não recuperar 5 pontos de vida atuais.
+      mensagem = "Treino concluído: +5 de Vida máxima permanente aplicado!";
+    } else if (normalizedOption === "energia") {
+      incrementoAplicado = 10;
+      local.atributos.energiaBase = Number(
+        ((local.atributos?.energiaBase ?? 100) + 10).toFixed(2),
+      );
+      // Regra 7.2: Não recuperar 10 pontos de energia atuais.
+      mensagem = "Treino concluído: +10 de Energia máxima permanente aplicado!";
+    } else if (normalizedOption === "velocidade") {
+      incrementoAplicado = 1;
+      local.atributos.velocidadeBase =
+        (local.atributos?.velocidadeBase ?? 0) + 1;
+      mensagem = "Treino concluído: +1 de Velocidade permanente aplicado!";
+    } else {
+      throw new Error(
+        "Opção de melhoria inválida. Escolha entre 'dano', 'vida', 'energia' ou 'velocidade'.",
+        { cause: err },
+      );
+    }
+
+    if (latitude || longitude) {
+      local.posicaoAtualLatitude = latitude;
+      local.posicaoAtualLongitude = longitude;
+    }
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome: nome || "Centro Esportivo",
+      categoria: "Sports",
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao: `Treino (${normalizedOption} +${incrementoAplicado})`,
+    });
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    const saved = saveLocalState(local);
+    if (dedupKey) {
+      localProcessedSportsInteractions.add(dedupKey);
+    }
+    return {
+      opcaoAtributo: normalizedOption,
+      mensagem,
+      incrementoAplicado,
+      jogador: saved,
+    };
+  }
+}

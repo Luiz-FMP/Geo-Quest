@@ -24,11 +24,254 @@ export const PLACE_FUNCTIONS = {
   HOSPITAL: "hospital",
   LODGING: "lodging",
   HOME: "home",
+  EXPLORATION: "exploration",
+  TRANSPORT: "transport",
+  CULTURE: "culture",
+  SPORTS: "sports",
   WIP: "wip",
 };
 
 export const SPECIAL_BOSS_SUBCATEGORY = "shopping_mall";
 export const SPECIAL_HOSPITAL_SUBCATEGORY = "general_hospital";
+
+export const SPECIFIC_NATURAL_SUBCATEGORIES = [
+  "beach",
+  "island",
+  "lake",
+  "mountain_peak",
+  "nature_preserve",
+  "river",
+  "scenic_spot",
+  "woods",
+];
+
+/**
+ * Seção 4.1: Nomes traduzidos e simplificados obrigatórios das 8 subcategorias de Natural Features.
+ */
+export const NATURAL_FEATURE_SUBCATEGORY_NAMES = {
+  beach: "Praia",
+  island: "Ilha",
+  lake: "Lago",
+  mountain_peak: "Pico de montanha",
+  nature_preserve: "Reserva natural",
+  river: "Rio",
+  scenic_spot: "Mirante",
+  woods: "Bosque",
+};
+
+/**
+ * Seção 4.2: Textos próprios de flavor para cada uma das oito subcategorias de Natural Features.
+ */
+export const NATURAL_FEATURE_FLAVOR_TEXTS = {
+  beach:
+    "A brisa do mar percorre a faixa de areia úmida, onde as ondas costumam deixar vestígios trazidos pela maré.",
+  island:
+    "Cercado por água em todas as direções, este refúgio isolado guarda recantos silenciosos prontos para serem explorados.",
+  lake:
+    "As águas tranquilas espelham o céu, enquanto as margens silenciosas parecem esconder segredos entre as pedras e juncos.",
+  mountain_peak:
+    "O vento frio da altitude acompanha uma visão ampla da paisagem, revelando fendas rochosas pouco visitadas.",
+  nature_preserve:
+    "A vegetação preservada protege trilhas naturais e clareiras discretas onde a natureza permanece quase intocada.",
+  river:
+    "A correnteza constante desliza sobre o leito de pedras, carregando pequenos objetos ao longo das margens.",
+  scenic_spot:
+    "Um ponto privilegiado de observação da paisagem, cercado por caminhos e arredores que convidam a uma busca atenta.",
+  woods:
+    "As árvores fechadas filtram a luz do sol sobre caminhos naturais cobertos de folhas, raízes e esconderijos.",
+};
+
+/**
+ * Traduções amigáveis de subcategorias para exibição nos menus sem expor identificadores técnicos.
+ */
+export const SUBCATEGORY_TRANSLATIONS = {
+  ...NATURAL_FEATURE_SUBCATEGORY_NAMES,
+  natural_feature: "Bosque",
+
+  // Transportation (Seção 5)
+  airport: "Aeroporto",
+  international_airport: "Aeroporto",
+  airstrip: "Aeroporto",
+  bus_station: "Estação de ônibus",
+  bus_stop: "Estação de ônibus",
+  ferry_terminal: "Terminal de balsas",
+  heliport: "Aeroporto",
+  light_rail_station: "Estação de ônibus",
+  park_and_ride: "Estação de ônibus",
+  subway_station: "Estação de ônibus",
+  taxi_stand: "Estação de ônibus",
+  train_station: "Estação de ônibus",
+  transit_depot: "Estação de ônibus",
+  transit_station: "Estação de ônibus",
+  truck_stop: "Estação de ônibus",
+
+  // Culture (Seção 6)
+  art_gallery: "Galeria de arte",
+  art_studio: "Estúdio de arte",
+  auditorium: "Auditório",
+  cultural_landmark: "Marco cultural",
+  historical_place: "Local histórico",
+  monument: "Monumento",
+  museum: "Museu",
+  performing_arts_theater: "Teatro",
+  sculpture: "Escultura",
+
+  // Sports (Seção 7)
+  arena: "Arena esportiva",
+  athletic_field: "Campo esportivo",
+  fishing_charter: "Pesca esportiva",
+  fishing_pond: "Lago de pesca",
+  fitness_center: "Centro de condicionamento",
+  golf_course: "Campo de golfe",
+  gym: "Academia",
+  ice_skating_rink: "Pista de patinação",
+  playground: "Área de recreação esportiva",
+  ski_resort: "Estação de esqui",
+  sports_activity_location: "Centro de atividades esportivas",
+  sports_club: "Clube esportivo",
+  sports_coaching: "Centro de treinamento",
+  sports_complex: "Complexo esportivo",
+  stadium: "Estádio",
+  swimming_pool: "Piscina esportiva",
+
+  // Services (Seção 3.3)
+  astrologer: "Astrólogo",
+  barber_shop: "Barbearia",
+  beautician: "Estética",
+  beauty_salon: "Salão de beleza",
+  body_art_service: "Estúdio de arte corporal",
+  catering_service: "Serviço de buffet",
+  cemetery: "Memorial",
+  child_care_agency: "Centro de cuidados",
+  consultant: "Consultoria",
+  courier_service: "Serviço de entregas",
+  electrician: "Serviço elétrico",
+  florist: "Floricultura",
+  food_delivery: "Serviço de entrega",
+  foot_care: "Podologia",
+  funeral_home: "Serviço funerário",
+  hair_care: "Cuidados capilares",
+  hair_salon: "Salão de cabeleireiro",
+  insurance_agency: "Seguradora",
+  laundry: "Lavanderia",
+  lawyer: "Escritório jurídico",
+  locksmith: "Chaveiro",
+  makeup_artist: "Estúdio de maquiagem",
+  moving_company: "Transportadora",
+  nail_salon: "Salão de manicure",
+  painter: "Oficina de pintura",
+  plumber: "Serviço hidráulico",
+  psychic: "Oráculo",
+  real_estate_agency: "Imobiliária",
+  roofing_contractor: "Oficina de manutenção",
+  storage: "Depósito",
+  summer_camp_organizer: "Organizador de expedições",
+  tailor: "Alfaiataria",
+  telecommunications_service_provider: "Central de telecomunicações",
+  tour_agency: "Agência de turismo",
+  tourist_information_center: "Centro de informações",
+  travel_agency: "Agência de viagens",
+  veterinary_care: "Clínica veterinária",
+
+  // Shopping (Seção 3.1)
+  shopping_mall: "Shopping Center",
+  store: "Loja de equipamentos",
+  clothing_store: "Loja de vestuário",
+  shoe_store: "Loja de calçados",
+  sporting_goods_store: "Loja de artigos esportivos",
+  electronics_store: "Loja de eletrônicos",
+  hardware_store: "Loja de ferramentas",
+  jewelry_store: "Joalheria",
+  book_store: "Livraria",
+  bicycle_store: "Loja de bicicletas",
+  department_store: "Loja de departamentos",
+  gift_shop: "Loja de presentes",
+  home_goods_store: "Loja de utilidades",
+  home_improvement_store: "Loja de construção",
+  market: "Mercado",
+  supermarket: "Supermercado",
+  grocery_store: "Mercearia",
+  convenience_store: "Loja de conveniência",
+  pet_store: "Pet shop",
+  auto_parts_store: "Loja de autopeças",
+  furniture_store: "Loja de móveis",
+  discount_store: "Loja de variedades",
+  warehouse_store: "Atacado",
+  wholesaler: "Distribuidora",
+
+  // Food and Drink (Seção 3.2)
+  restaurant: "Restaurante",
+  cafe: "Cafeteria",
+  coffee_shop: "Cafeteria",
+  bakery: "Padaria",
+  bar: "Bar",
+  pub: "Pub",
+  fast_food_restaurant: "Lanchonete rápida",
+  hamburger_restaurant: "Hamburgueria",
+  pizza_restaurant: "Pizzaria",
+  ice_cream_shop: "Sorveteria",
+  juice_shop: "Casa de sucos",
+  acai_shop: "Loja de açaí",
+  snack_bar: "Lanchonete",
+  sandwich_shop: "Sanduicheria",
+  dessert_shop: "Confeitaria",
+  confectionery: "Doceria",
+  candy_store: "Loja de doces",
+  chocolate_shop: "Chocolateria",
+  tea_house: "Casa de chá",
+  steak_house: "Churrascaria",
+  barbecue_restaurant: "Churrascaria",
+  brazilian_restaurant: "Restaurante brasileiro",
+  italian_restaurant: "Restaurante italiano",
+  japanese_restaurant: "Restaurante japonês",
+  sushi_restaurant: "Restaurante de sushi",
+
+  // Health, Lodging, Entertainment, Home
+  general_hospital: "Hospital geral",
+  hospital: "Hospital",
+  pharmacy: "Farmácia",
+  drugstore: "Drogaria",
+  hotel: "Hotel",
+  inn: "Pousada",
+  hostel: "Hostel",
+  lodging: "Hospedagem",
+  park: "Parque",
+  plaza: "Praça",
+  tourist_attraction: "Atração turística",
+  home: "Ponto inicial",
+};
+
+const CATEGORY_FALLBACK_SUBCATEGORY_LABELS = {
+  [ALLOWED_CATEGORIES.NATURAL_FEATURES]: "Bosque",
+  [ALLOWED_CATEGORIES.TRANSPORTATION]: "Terminal de transporte",
+  [ALLOWED_CATEGORIES.CULTURE]: "Espaço cultural",
+  [ALLOWED_CATEGORIES.SPORTS]: "Centro esportivo",
+  [ALLOWED_CATEGORIES.SERVICES]: "Estabelecimento de serviços",
+  [ALLOWED_CATEGORIES.SHOPPING]: "Loja de equipamentos",
+  [ALLOWED_CATEGORIES.FOOD_AND_DRINK]: "Loja de consumíveis",
+  [ALLOWED_CATEGORIES.HEALTH_AND_WELLNESS]: "Centro de saúde",
+  [ALLOWED_CATEGORIES.LODGING]: "Hospedagem",
+  [ALLOWED_CATEGORIES.ENTERTAINMENT]: "Arena",
+};
+
+export function getTranslatedSubcategory(subcategory, category = null) {
+  const key = typeof subcategory === "string" ? subcategory.trim().toLowerCase() : "";
+  if (key && SUBCATEGORY_TRANSLATIONS[key]) {
+    return SUBCATEGORY_TRANSLATIONS[key];
+  }
+  if (category && CATEGORY_FALLBACK_SUBCATEGORY_LABELS[category]) {
+    return CATEGORY_FALLBACK_SUBCATEGORY_LABELS[category];
+  }
+  return "Local";
+}
+
+export function getNaturalFeatureFlavorText(subcategory) {
+  const key = typeof subcategory === "string" ? subcategory.trim().toLowerCase() : "";
+  return (
+    NATURAL_FEATURE_FLAVOR_TEXTS[key] ||
+    NATURAL_FEATURE_FLAVOR_TEXTS.woods
+  );
+}
 
 /**
  * Ordem de prioridade centralizada e documentada para classificação quando primaryType
@@ -59,9 +302,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.CULTURE,
     key: "culture",
     color: "#EC4899",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.CULTURE,
+    interactionHint: "Espaço cultural que concede um aprimoramento aleatório gratuito ao visitante.",
+    actionLabel: "RECEBER BUFF",
     subcategories: [
       "art_gallery", "art_studio", "auditorium", "cultural_landmark", "historical_place",
       "monument", "museum", "performing_arts_theater", "sculpture",
@@ -71,9 +314,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.FOOD_AND_DRINK,
     key: "food_and_drink",
     color: "#F59E0B",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.SHOP,
+    interactionHint: "Loja de consumíveis. Confira os espaços de produtos e seu inventário de consumíveis.",
+    actionLabel: "LOJA",
     subcategories: [
       "acai_shop", "afghani_restaurant", "african_restaurant", "american_restaurant",
       "asian_restaurant", "bagel_shop", "bakery", "bar", "bar_and_grill",
@@ -109,7 +352,7 @@ export const ORDERED_CATEGORY_RULES = [
     key: "shopping",
     color: "#06B6D4",
     placeFunction: PLACE_FUNCTIONS.SHOP,
-    interactionHint: "Explore esta loja e confira os produtos disponíveis.",
+    interactionHint: "Loja de equipamentos. Confira os espaços de produtos e seu inventário de equipamentos.",
     actionLabel: "LOJA",
     subcategories: [
       "asian_grocery_store", "auto_parts_store", "bicycle_store", "book_store",
@@ -125,9 +368,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.SPORTS,
     key: "sports",
     color: "#8B5CF6",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.SPORTS,
+    interactionHint: "Local esportivo que permite escolher uma melhoria permanente de atributo.",
+    actionLabel: "TREINAR",
     subcategories: [
       "arena", "athletic_field", "fishing_charter", "fishing_pond", "fitness_center",
       "golf_course", "gym", "ice_skating_rink", "playground", "ski_resort",
@@ -139,9 +382,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.NATURAL_FEATURES,
     key: "natural_features",
     color: "#22C55E",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.EXPLORATION,
+    interactionHint: "Vasculhe o local em busca de descobertas deixadas pela natureza.",
+    actionLabel: "VASCULHAR LOCAL",
     subcategories: [
       "beach", "island", "lake", "mountain_peak", "nature_preserve",
       "river", "scenic_spot", "woods", "natural_feature",
@@ -165,9 +408,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.TRANSPORTATION,
     key: "transportation",
     color: "#3B82F6",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.TRANSPORT,
+    interactionHint: "Ponto de transporte que conecta terminais do mesmo tipo na região.",
+    actionLabel: "VER LOCALIZAÇÕES PRÓXIMAS",
     subcategories: [
       "airport", "airstrip", "bus_station", "bus_stop", "ferry_terminal",
       "heliport", "international_airport", "light_rail_station", "park_and_ride",
@@ -179,9 +422,9 @@ export const ORDERED_CATEGORY_RULES = [
     category: ALLOWED_CATEGORIES.SERVICES,
     key: "services",
     color: "#A855F7",
-    placeFunction: PLACE_FUNCTIONS.WIP,
-    interactionHint: "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.",
-    actionLabel: null,
+    placeFunction: PLACE_FUNCTIONS.SHOP,
+    interactionHint: "Estabelecimento de serviços que oferece um aprimoramento temporário por 50g.",
+    actionLabel: "COMPRAR BUFF (50g)",
     subcategories: [
       "astrologer", "barber_shop", "beautician", "beauty_salon", "body_art_service",
       "catering_service", "cemetery", "child_care_agency", "consultant", "courier_service",
@@ -206,8 +449,41 @@ function findRuleForSubcategory(subcategory) {
   return null;
 }
 
-function buildClassification(rule, subcategory) {
-  if (subcategory === SPECIAL_BOSS_SUBCATEGORY) {
+function resolveSpecificSubcategory(rule, candidateSubcategory, normalizedTypes = []) {
+  if (!rule) return candidateSubcategory;
+
+  if (rule.category === ALLOWED_CATEGORIES.NATURAL_FEATURES) {
+    if (!candidateSubcategory || candidateSubcategory === "natural_feature") {
+      const specific = SPECIFIC_NATURAL_SUBCATEGORIES.find((s) =>
+        normalizedTypes.includes(s),
+      );
+      return specific || "woods";
+    }
+    return candidateSubcategory;
+  }
+
+  if (rule.category === ALLOWED_CATEGORIES.TRANSPORTATION) {
+    if (
+      candidateSubcategory === "airport" ||
+      candidateSubcategory === "international_airport" ||
+      candidateSubcategory === "airstrip" ||
+      candidateSubcategory === "heliport" ||
+      normalizedTypes.includes("airport") ||
+      normalizedTypes.includes("international_airport") ||
+      normalizedTypes.includes("airstrip")
+    ) {
+      return "airport";
+    }
+    return "bus_station";
+  }
+
+  return candidateSubcategory;
+}
+
+function buildClassification(rule, subcategory, normalizedTypes = []) {
+  const resolvedSub = resolveSpecificSubcategory(rule, subcategory, normalizedTypes);
+
+  if (resolvedSub === SPECIAL_BOSS_SUBCATEGORY) {
     return {
       key: "shopping_boss",
       category: ALLOWED_CATEGORIES.SHOPPING,
@@ -221,15 +497,20 @@ function buildClassification(rule, subcategory) {
     };
   }
 
+  const interactionHint =
+    rule.category === ALLOWED_CATEGORIES.NATURAL_FEATURES
+      ? getNaturalFeatureFlavorText(resolvedSub)
+      : rule.interactionHint;
+
   return {
     key: rule.key,
     category: rule.category,
-    subcategory,
-    rawType: subcategory,
+    subcategory: resolvedSub,
+    rawType: resolvedSub,
     placeFunction: rule.placeFunction,
     isBossSpecial: false,
     color: rule.color,
-    interactionHint: rule.interactionHint,
+    interactionHint,
     actionLabel: rule.actionLabel,
   };
 }
@@ -262,7 +543,7 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     const shoppingRule = ORDERED_CATEGORY_RULES.find(
       (r) => r.category === ALLOWED_CATEGORIES.SHOPPING,
     );
-    return buildClassification(shoppingRule, SPECIAL_BOSS_SUBCATEGORY);
+    return buildClassification(shoppingRule, SPECIAL_BOSS_SUBCATEGORY, normalizedTypes);
   }
 
   // 2. Preservar general_hospital quando presente nos tipos de Health and Wellness (Seção 7.1)
@@ -273,32 +554,42 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     const healthRule = ORDERED_CATEGORY_RULES.find(
       (r) => r.category === ALLOWED_CATEGORIES.HEALTH_AND_WELLNESS,
     );
-    return buildClassification(healthRule, SPECIAL_HOSPITAL_SUBCATEGORY);
+    return buildClassification(healthRule, SPECIAL_HOSPITAL_SUBCATEGORY, normalizedTypes);
   }
 
   // 3. Utilizar primeiro o primaryType, caso pertença a uma das 10 categorias permitidas
   if (normalizedPrimary) {
     const primaryRule = findRuleForSubcategory(normalizedPrimary);
     if (primaryRule) {
-      return buildClassification(primaryRule, normalizedPrimary);
+      return buildClassification(primaryRule, normalizedPrimary, normalizedTypes);
     }
   }
 
   // 4. Caso contrário, buscar nos types válidos seguindo a ordem de prioridade centralizada
   for (const rule of ORDERED_CATEGORY_RULES) {
     const matched = normalizedTypes.find(
-      (t) => t !== "store" && rule.subcategories.includes(t),
+      (t) =>
+        t !== "store" &&
+        t !== "natural_feature" &&
+        rule.subcategories.includes(t),
     );
     if (matched) {
-      return buildClassification(rule, matched);
+      return buildClassification(rule, matched, normalizedTypes);
     }
+  }
+
+  if (normalizedTypes.includes("natural_feature")) {
+    const naturalRule = ORDERED_CATEGORY_RULES.find(
+      (r) => r.category === ALLOWED_CATEGORIES.NATURAL_FEATURES,
+    );
+    return buildClassification(naturalRule, "natural_feature", normalizedTypes);
   }
 
   if (normalizedTypes.includes("store")) {
     const shoppingRule = ORDERED_CATEGORY_RULES.find(
       (r) => r.category === ALLOWED_CATEGORIES.SHOPPING,
     );
-    return buildClassification(shoppingRule, "store");
+    return buildClassification(shoppingRule, "store", normalizedTypes);
   }
 
   // Caso já venha pré-classificado do backend em uma das 10 categorias permitidas
@@ -308,7 +599,7 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     );
     if (ruleByCategoryName) {
       const sub = normalizedTypes[0] || ruleByCategoryName.subcategories[0];
-      return buildClassification(ruleByCategoryName, sub);
+      return buildClassification(ruleByCategoryName, sub, normalizedTypes);
     }
   }
 
@@ -335,6 +626,7 @@ export function createHomePlace(coords) {
     category: "Local especial",
     categoryKey: "home",
     subcategory: "home",
+    subcategoryLabel: "Ponto inicial",
     rawType: "home",
     placeFunction: PLACE_FUNCTIONS.HOME,
     isBossSpecial: false,
@@ -385,7 +677,9 @@ export function normalizePlaceRecord(rawPlace, index = 0) {
       ? rawPlace.name.trim()
       : typeof rawPlace.displayName === "string" && rawPlace.displayName.trim().length > 0
         ? rawPlace.displayName.trim()
-        : `Local #${index + 1}`;
+        : typeof rawPlace.displayName?.text === "string" && rawPlace.displayName.text.trim().length > 0
+          ? rawPlace.displayName.text.trim()
+          : `Local #${index + 1}`;
 
   const rawTypes = [];
   if (Array.isArray(rawPlace.types)) {
@@ -423,12 +717,16 @@ export function normalizePlaceRecord(rawPlace, index = 0) {
     category: categoryInfo.category,
     categoryKey: categoryInfo.key,
     subcategory: categoryInfo.subcategory,
+    subcategoryLabel: getTranslatedSubcategory(
+      categoryInfo.subcategory,
+      categoryInfo.category,
+    ),
     rawType: categoryInfo.rawType,
     placeFunction: categoryInfo.placeFunction,
     isBossSpecial: categoryInfo.isBossSpecial,
     color: categoryInfo.color,
     interactionHint: categoryInfo.interactionHint,
     actionLabel: categoryInfo.actionLabel,
-    address: rawPlace.vicinity || rawPlace.address || null,
+    address: rawPlace.vicinity || rawPlace.address || rawPlace.formattedAddress || null,
   };
 }

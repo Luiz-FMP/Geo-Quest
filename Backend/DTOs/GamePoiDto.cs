@@ -16,11 +16,21 @@ public record GamePoiDto(
     IReadOnlyList<string>? Types = null
 );
 
+public record TransportDestinationDto(
+    string Id,
+    string Name,
+    double Latitude,
+    double Longitude,
+    string Category,
+    string Subcategory,
+    double DistanceKm,
+    int TravelCostCoins,
+    string? Address = null
+);
+
 public record CharacterSlotDto(
     int Id,
     string Name,
     bool IsAvailable,
     string StatusLabel
 );
-
-

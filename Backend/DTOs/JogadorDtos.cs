@@ -235,3 +235,65 @@ public record RetornarCheckpointRequest(
     string Motivo,
     string Destino
 );
+
+public record VasculharNaturalFeatureRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0,
+    string? InteracaoId = null
+);
+
+public record VasculharNaturalFeatureResponse(
+    string TipoResultado,
+    string Resultado,
+    string Mensagem,
+    int MoedasGanhas,
+    ItemInventarioDto? ItemEncontrado,
+    JogadorEstadoDto Jogador
+);
+
+public record ViajarTransporteRequest(
+    string? OrigemPlaceId = null,
+    string? OrigemNome = null,
+    string? OrigemSubcategoria = null,
+    string DestinoPlaceId = "",
+    string DestinoNome = "",
+    string? Subcategoria = null,
+    string? DestinoSubcategoria = null,
+    double OrigemLatitude = 0,
+    double OrigemLongitude = 0,
+    double DestinoLatitude = 0,
+    double DestinoLongitude = 0,
+    double? DistanciaKm = null
+);
+
+public record ViajarTransporteResponse(
+    string DestinoPlaceId,
+    string DestinoNome,
+    string Subcategoria,
+    double Latitude,
+    double Longitude,
+    double DistanciaKm,
+    int CustoMoedas,
+    JogadorEstadoDto Jogador
+);
+
+public record TreinarSportsRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0,
+    string? OpcaoAtributo = null,
+    string? Opcao = null,
+    string? InteracaoId = null
+);
+
+public record TreinarSportsResponse(
+    string OpcaoAtributo,
+    string Mensagem,
+    int IncrementoAplicado,
+    JogadorEstadoDto Jogador
+);

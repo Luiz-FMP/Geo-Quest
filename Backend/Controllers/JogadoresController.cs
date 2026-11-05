@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using GeoQuest.Api.Data;
 using GeoQuest.Api.DTOs;
+using GeoQuest.Api.Integrations;
 using GeoQuest.Api.Models;
 using GeoQuest.Api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +15,12 @@ public class JogadoresController : ControllerBase
 {
     public const int CustoMoedasCuraPaga = 50;
     public const int CustoMoedasDescansoLodging = 25;
+    public const int RecompensaMoedasExploracaoNatural = 10;
     public const int LimiteHistoricoPorCategoria = 10;
+
+    private static readonly SemaphoreSlim ActionConcurrencyLock = new(1, 1);
+    private static readonly ConcurrentDictionary<string, VasculharNaturalFeatureResponse> ProcessedExplorations = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, TreinarSportsResponse> ProcessedSportsInteractions = new(StringComparer.Ordinal);
 
     private static readonly HashSet<string> CategoriasComHistorico = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -608,6 +615,404 @@ public class JogadoresController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Seção 4: Vasculhar locais de Natural Features.
+    /// Probabilidades isoladas no backend:
+    /// - 50%: Encontrar um item (Item de Debug existente, preparado para futura tabela de raridades)
+    /// - 25%: Encontrar moedas (+10g)
+    /// - 25%: Não encontrar nada
+    /// </summary>
+    [HttpPost("atual/natural-features/vasculhar")]
+    public async Task<ActionResult<VasculharNaturalFeatureResponse>> VasculharNaturalFeature(
+        [FromBody] VasculharNaturalFeatureRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.PlaceId))
+        {
+            return BadRequest(new { mensagem = "Identificador do local de exploração inválido." });
+        }
+
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            string? dedupKey = string.IsNullOrWhiteSpace(request.InteracaoId)
+                ? null
+                : $"{request.PlaceId.Trim()}:{request.InteracaoId.Trim()}";
+
+            if (dedupKey is not null && ProcessedExplorations.TryGetValue(dedupKey, out var cachedResponse))
+            {
+                return Ok(cachedResponse);
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+            string placeId = request.PlaceId.Trim();
+            string nome = string.IsNullOrWhiteSpace(request.Nome) ? "Local Natural" : request.Nome.Trim();
+            string subcategoria = string.IsNullOrWhiteSpace(request.Subcategoria)
+                ? "woods"
+                : request.Subcategoria.Trim().ToLowerInvariant();
+
+            string tipoResultado = SortearResultadoExploracaoNatural(Random.Shared.NextDouble());
+            string mensagemNarrativa;
+            int moedasGanhas = 0;
+            ItemInventarioDto? itemObtidoDto = null;
+
+            if (tipoResultado == "item")
+            {
+                var itemAdded = await AdicionarItemRecompensaExploracaoAsync(jogador, cancellationToken);
+                if (itemAdded is not null)
+                {
+                    itemObtidoDto = PlayerStatsCalculator.MapearItemInventario(itemAdded);
+                    mensagemNarrativa = "Você investiga cuidadosamente os arredores e encontra um objeto curioso escondido na natureza!";
+                }
+                else
+                {
+                    // Caso a mochila esteja 50/50 cheia, ainda exibe o item de debug encontrado sem falhar a exploração
+                    var itemDebugDef = await ObterOuCriarDefinicaoItemDebugAsync(cancellationToken);
+                    itemObtidoDto = new ItemInventarioDto(
+                        InventarioId: 0,
+                        ItemDefinicaoId: itemDebugDef.Id,
+                        Codigo: itemDebugDef.Codigo,
+                        Nome: itemDebugDef.Nome,
+                        Descricao: itemDebugDef.Descricao,
+                        Categoria: itemDebugDef.Categoria,
+                        Raridade: itemDebugDef.Raridade,
+                        Equipavel: itemDebugDef.Equipavel,
+                        SlotEquipamentoCompativel: itemDebugDef.SlotEquipamentoCompativel,
+                        CategoriaAba: itemDebugDef.Categoria,
+                        SlotIndice: null,
+                        Equipado: false,
+                        SlotEquipado: null,
+                        Quantidade: 1,
+                        BonusVida: itemDebugDef.BonusVida,
+                        BonusEnergia: itemDebugDef.BonusEnergia,
+                        BonusDano: itemDebugDef.BonusDano,
+                        BonusDefesa: itemDebugDef.BonusDefesa,
+                        BonusVelocidade: itemDebugDef.BonusVelocidade,
+                        PlaceholderKey: itemDebugDef.PlaceholderKey
+                    );
+                    mensagemNarrativa = "Você encontra um item entre a vegetação! (Sua mochila de equipamentos já está com todos os 50 slots ocupados).";
+                }
+            }
+            else if (tipoResultado == "moedas")
+            {
+                moedasGanhas = RecompensaMoedasExploracaoNatural;
+                jogador.Moedas = Math.Max(0, jogador.Moedas + moedasGanhas);
+                mensagemNarrativa = "Você vê algo brilhando entre as pedras. Ao investigar, encontra 10g!";
+            }
+            else
+            {
+                mensagemNarrativa = "Você procura cuidadosamente pela região, mas não encontra nada de interessante.";
+            }
+
+            if (request.Latitude != 0 || request.Longitude != 0)
+            {
+                jogador.PosicaoAtualLatitude = Math.Round(request.Latitude, 6);
+                jogador.PosicaoAtualLongitude = Math.Round(request.Longitude, 6);
+            }
+
+            await RegistrarVisitaECheckpointInternoAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategoryNaturalFeatures,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                estadoInteracao: $"Vasculhado ({tipoResultado})",
+                marcarConcluido: false,
+                marcarCuraGratuita: false,
+                cancellationToken);
+
+            if (jogador.Estatisticas is not null)
+            {
+                jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+            var response = new VasculharNaturalFeatureResponse(
+                TipoResultado: tipoResultado,
+                Resultado: tipoResultado,
+                Mensagem: mensagemNarrativa,
+                MoedasGanhas: moedasGanhas,
+                ItemEncontrado: itemObtidoDto,
+                Jogador: estado
+            );
+
+            if (dedupKey is not null)
+            {
+                ProcessedExplorations[dedupKey] = response;
+            }
+
+            return Ok(response);
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Seção 5: Execução de viagem direta entre pontos de transporte do mesmo tipo (airport -> airport ou bus_station -> bus_station).
+    /// Custo = distancia_km * 10 convertido em moedas (g), sem modificador de velocidade, sem consumo de energia e sem combate.
+    /// </summary>
+    [HttpPost("atual/transporte/viajar")]
+    public async Task<ActionResult<ViajarTransporteResponse>> ViajarPorTransporte(
+        [FromBody] ViajarTransporteRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.DestinoPlaceId))
+        {
+            return BadRequest(new { mensagem = "Destino de transporte inválido." });
+        }
+
+        string rawSubcategoria = (request.Subcategoria ?? request.DestinoSubcategoria ?? request.OrigemSubcategoria ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+        string subcategoria = rawSubcategoria switch
+        {
+            "airport" or "international_airport" or "airstrip" or "heliport" => "airport",
+            "bus_station" or "bus_stop" or "transit_station" or "transit_depot" or "light_rail_station" or "subway_station" or "train_station" => "bus_station",
+            _ => rawSubcategoria
+        };
+        if (subcategoria is not ("airport" or "bus_station"))
+        {
+            return BadRequest(new { mensagem = "Tipo de transporte não suportado. Apenas aeroportos e estações de ônibus são permitidos." });
+        }
+
+        if (double.IsNaN(request.DestinoLatitude) || double.IsNaN(request.DestinoLongitude) ||
+            request.DestinoLatitude < -90 || request.DestinoLatitude > 90 ||
+            request.DestinoLongitude < -180 || request.DestinoLongitude > 180)
+        {
+            return BadRequest(new { mensagem = "Coordenadas do destino inválidas." });
+        }
+
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+
+            double origemLat = request.OrigemLatitude != 0
+                ? request.OrigemLatitude
+                : (jogador.PosicaoAtualLatitude ?? request.DestinoLatitude);
+            double origemLng = request.OrigemLongitude != 0
+                ? request.OrigemLongitude
+                : (jogador.PosicaoAtualLongitude ?? request.DestinoLongitude);
+
+            double haversineKm = GooglePlacesClient.CalculateHaversineKm(
+                origemLat,
+                origemLng,
+                request.DestinoLatitude,
+                request.DestinoLongitude);
+
+            double distanciaKm = request.DistanciaKm is > 0 && !double.IsNaN(request.DistanciaKm.Value)
+                ? Math.Round(request.DistanciaKm.Value, 3)
+                : Math.Round(haversineKm, 3);
+
+            if (distanciaKm <= 0)
+            {
+                distanciaKm = Math.Max(0.05, Math.Round(haversineKm, 3));
+            }
+
+            int custoMoedas = GooglePlacesClient.CalculateTransportCostCoins(distanciaKm);
+
+            if (jogador.Moedas < custoMoedas)
+            {
+                return BadRequest(new
+                {
+                    mensagem = $"Você não possui moedas suficientes para esta viagem. Custo: {custoMoedas}g (Saldo atual: {jogador.Moedas}g)."
+                });
+            }
+
+            jogador.Moedas = Math.Max(0, jogador.Moedas - custoMoedas);
+            jogador.PosicaoAtualLatitude = Math.Round(request.DestinoLatitude, 6);
+            jogador.PosicaoAtualLongitude = Math.Round(request.DestinoLongitude, 6);
+
+            string destinoId = request.DestinoPlaceId.Trim();
+            string destinoNome = string.IsNullOrWhiteSpace(request.DestinoNome)
+                ? (subcategoria == "airport" ? "Aeroporto" : "Estação de Ônibus")
+                : request.DestinoNome.Trim();
+
+            if (jogador.Estatisticas is not null)
+            {
+                jogador.Estatisticas.DistanciaPercorridaKm = Math.Round(
+                    jogador.Estatisticas.DistanciaPercorridaKm + distanciaKm,
+                    3);
+                jogador.Estatisticas.PlacesVisitados += 1;
+                jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+            }
+
+            await RegistrarVisitaECheckpointInternoAsync(
+                jogador,
+                destinoId,
+                destinoNome,
+                PlaceCategoryMapper.CategoryTransportation,
+                subcategoria,
+                request.DestinoLatitude,
+                request.DestinoLongitude,
+                estadoInteracao: $"Viagem concluída (-{custoMoedas}g)",
+                marcarConcluido: false,
+                marcarCuraGratuita: false,
+                cancellationToken);
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+            return Ok(new ViajarTransporteResponse(
+                DestinoPlaceId: destinoId,
+                DestinoNome: destinoNome,
+                Subcategoria: subcategoria,
+                Latitude: jogador.PosicaoAtualLatitude.Value,
+                Longitude: jogador.PosicaoAtualLongitude.Value,
+                DistanciaKm: distanciaKm,
+                CustoMoedas: custoMoedas,
+                Jogador: estado
+            ));
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Seção 7: Sports — Melhorias permanentes de atributos.
+    /// Opções:
+    /// - "dano": +1 de dano
+    /// - "vida": +5 de vida máxima (sem recuperar vida atual)
+    /// - "energia": +10 de energia máxima (sem recuperar energia atual)
+    /// - "velocidade": +1 de velocidade
+    /// Apenas uma escolha por interação com o Place.
+    /// </summary>
+    [HttpPost("atual/sports/treinar")]
+    public async Task<ActionResult<TreinarSportsResponse>> TreinarEmSports(
+        [FromBody] TreinarSportsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.PlaceId))
+        {
+            return BadRequest(new { mensagem = "Identificador do local esportivo inválido." });
+        }
+
+        string opcao = (!string.IsNullOrWhiteSpace(request.OpcaoAtributo) ? request.OpcaoAtributo : (request.Opcao ?? string.Empty))
+            .Trim()
+            .ToLowerInvariant();
+        if (opcao is not ("dano" or "vida" or "energia" or "velocidade"))
+        {
+            return BadRequest(new
+            {
+                mensagem = "Opção de melhoria inválida. Escolha entre 'dano', 'vida', 'energia' ou 'velocidade'."
+            });
+        }
+
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            string? interactionKey = string.IsNullOrWhiteSpace(request.InteracaoId)
+                ? null
+                : $"{request.PlaceId.Trim()}:{request.InteracaoId.Trim()}";
+
+            if (interactionKey is not null && ProcessedSportsInteractions.ContainsKey(interactionKey))
+            {
+                return BadRequest(new
+                {
+                    mensagem = "Você já escolheu uma melhoria de atributo nesta interação com o local."
+                });
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+            int incrementoAplicado;
+            string mensagemMelhoria;
+
+            switch (opcao)
+            {
+                case "dano":
+                    incrementoAplicado = 1;
+                    jogador.DanoBase += 1;
+                    mensagemMelhoria = "Treino concluído: +1 de Dano permanente aplicado!";
+                    break;
+                case "vida":
+                    incrementoAplicado = 5;
+                    jogador.VidaBase += 5;
+                    // Regra 7.2: Não recuperar 5 pontos de vida atuais.
+                    mensagemMelhoria = "Treino concluído: +5 de Vida máxima permanente aplicado!";
+                    break;
+                case "energia":
+                    incrementoAplicado = 10;
+                    jogador.EnergiaBase = Math.Round(jogador.EnergiaBase + 10.0, 2);
+                    // Regra 7.2: Não recuperar 10 pontos de energia atuais.
+                    mensagemMelhoria = "Treino concluído: +10 de Energia máxima permanente aplicado!";
+                    break;
+                default: // "velocidade"
+                    incrementoAplicado = 1;
+                    jogador.VelocidadeBase += 1;
+                    mensagemMelhoria = "Treino concluído: +1 de Velocidade permanente aplicado!";
+                    break;
+            }
+
+            string placeId = request.PlaceId.Trim();
+            string nome = string.IsNullOrWhiteSpace(request.Nome) ? "Centro Esportivo" : request.Nome.Trim();
+            string subcategoria = string.IsNullOrWhiteSpace(request.Subcategoria)
+                ? "gym"
+                : request.Subcategoria.Trim().ToLowerInvariant();
+
+            if (request.Latitude != 0 || request.Longitude != 0)
+            {
+                jogador.PosicaoAtualLatitude = Math.Round(request.Latitude, 6);
+                jogador.PosicaoAtualLongitude = Math.Round(request.Longitude, 6);
+            }
+
+            await RegistrarVisitaECheckpointInternoAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategorySports,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                estadoInteracao: $"Treino ({opcao} +{incrementoAplicado})",
+                marcarConcluido: false,
+                marcarCuraGratuita: false,
+                cancellationToken);
+
+            if (jogador.Estatisticas is not null)
+            {
+                jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+            var response = new TreinarSportsResponse(
+                OpcaoAtributo: opcao,
+                Mensagem: mensagemMelhoria,
+                IncrementoAplicado: incrementoAplicado,
+                Jogador: estado
+            );
+
+            if (interactionKey is not null)
+            {
+                ProcessedSportsInteractions[interactionKey] = response;
+            }
+
+            return Ok(response);
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
     [HttpGet("atual/atributos")]
     public async Task<ActionResult<AtributosDetalhadosDto>> GetAtributos(CancellationToken cancellationToken)
     {
@@ -719,69 +1124,11 @@ public class JogadoresController : ControllerBase
     public async Task<ActionResult<JogadorEstadoDto>> GerarItemDebug(CancellationToken cancellationToken)
     {
         var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+        var novoItem = await AdicionarItemRecompensaExploracaoAsync(jogador, cancellationToken);
 
-        var itemDebugDef = await _context.ItensDefinicao
-            .FirstOrDefaultAsync(i => i.Codigo == DatabaseInitializer.CodigoItemDebug, cancellationToken);
-
-        if (itemDebugDef is null)
-        {
-            itemDebugDef = new ItemDefinicao
-            {
-                Codigo = DatabaseInitializer.CodigoItemDebug,
-                Nome = "Item de Debug",
-                Descricao = "Item temporário de teste para validar movimentação nos slots e descarte na lixeira.",
-                Categoria = CategoriasItem.Equipavel,
-                Raridade = RaridadesItem.Raro,
-                Equipavel = false,
-                SlotEquipamentoCompativel = null,
-                PlaceholderKey = "item_debug"
-            };
-            _context.ItensDefinicao.Add(itemDebugDef);
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
-        var slotsOcupados = jogador.ItensInventario
-            .Where(i => !i.Equipado &&
-                        string.Equals(i.CategoriaAba, itemDebugDef.Categoria, StringComparison.OrdinalIgnoreCase) &&
-                        i.SlotIndice.HasValue)
-            .Select(i => i.SlotIndice!.Value)
-            .ToHashSet();
-
-        int? primeiroSlotLivre = null;
-        for (int s = 0; s < PlayerStatsCalculator.TotalSlotsMochila; s++)
-        {
-            if (!slotsOcupados.Contains(s))
-            {
-                primeiroSlotLivre = s;
-                break;
-            }
-        }
-
-        if (primeiroSlotLivre is null)
+        if (novoItem is null)
         {
             return BadRequest(new { mensagem = "A mochila está cheia (50/50 slots ocupados)." });
-        }
-
-        var novoItem = new ItemInventario
-        {
-            JogadorId = jogador.Id,
-            ItemDefinicaoId = itemDebugDef.Id,
-            ItemDefinicao = itemDebugDef,
-            CategoriaAba = itemDebugDef.Categoria,
-            SlotIndice = primeiroSlotLivre.Value,
-            Equipado = false,
-            SlotEquipado = null,
-            Quantidade = 1,
-            DataObtencaoUtc = DateTime.UtcNow
-        };
-
-        _context.ItensInventario.Add(novoItem);
-        jogador.ItensInventario.Add(novoItem);
-
-        if (jogador.Estatisticas is not null)
-        {
-            jogador.Estatisticas.ItensObtidos += 1;
-            jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -993,6 +1340,100 @@ public class JogadoresController : ControllerBase
         return Ok(new[] { estado });
     }
 
+    /// <summary>
+    /// Isola a tabela de probabilidades da exploração de Natural Features (Seção 4.3):
+    /// - [0.00, 0.50): item (50%)
+    /// - [0.50, 0.75): moedas (25%)
+    /// - [0.75, 1.00): nada (25%)
+    /// Preparado para futura subdivisão dos 50% de itens em raridades sem alterar o fluxo do controlador.
+    /// </summary>
+    public static string SortearResultadoExploracaoNatural(double roll)
+    {
+        if (roll < 0.50)
+        {
+            return "item";
+        }
+
+        if (roll < 0.75)
+        {
+            return "moedas";
+        }
+
+        return "nada";
+    }
+
+    /// <summary>
+    /// Isola a seleção de qual item é entregue quando o resultado da exploração é "item".
+    /// Futuramente pode receber o roll de raridade sem alterar o restante do sistema de exploração.
+    /// </summary>
+    public static string SelecionarCodigoItemExploracao()
+    {
+        return DatabaseInitializer.CodigoItemDebug;
+    }
+
+    private async Task<ItemDefinicao> ObterOuCriarDefinicaoItemDebugAsync(CancellationToken cancellationToken)
+    {
+        string codigoAlvo = SelecionarCodigoItemExploracao();
+        var itemDebugDef = await _context.ItensDefinicao
+            .FirstOrDefaultAsync(i => i.Codigo == codigoAlvo, cancellationToken);
+
+        if (itemDebugDef is null)
+        {
+            itemDebugDef = new ItemDefinicao
+            {
+                Codigo = DatabaseInitializer.CodigoItemDebug,
+                Nome = "Item de Debug",
+                Descricao = "Item temporário de teste para validar movimentação nos slots e descarte na lixeira.",
+                Categoria = CategoriasItem.Equipavel,
+                Raridade = RaridadesItem.Raro,
+                Equipavel = false,
+                SlotEquipamentoCompativel = null,
+                PlaceholderKey = "item_debug"
+            };
+            _context.ItensDefinicao.Add(itemDebugDef);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return itemDebugDef;
+    }
+
+    private async Task<ItemInventario?> AdicionarItemRecompensaExploracaoAsync(
+        Jogador jogador,
+        CancellationToken cancellationToken)
+    {
+        var itemDef = await ObterOuCriarDefinicaoItemDebugAsync(cancellationToken);
+        int? primeiroSlotLivre = EncontrarPrimeiroSlotLivre(jogador, itemDef.Categoria);
+
+        if (primeiroSlotLivre is null)
+        {
+            return null;
+        }
+
+        var novoItem = new ItemInventario
+        {
+            JogadorId = jogador.Id,
+            ItemDefinicaoId = itemDef.Id,
+            ItemDefinicao = itemDef,
+            CategoriaAba = itemDef.Categoria,
+            SlotIndice = primeiroSlotLivre.Value,
+            Equipado = false,
+            SlotEquipado = null,
+            Quantidade = 1,
+            DataObtencaoUtc = DateTime.UtcNow
+        };
+
+        _context.ItensInventario.Add(novoItem);
+        jogador.ItensInventario.Add(novoItem);
+
+        if (jogador.Estatisticas is not null)
+        {
+            jogador.Estatisticas.ItensObtidos += 1;
+            jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+        }
+
+        return novoItem;
+    }
+
     private async Task<EstadoPermanentePlace> ObterOuCriarEstadoPermanenteAsync(
         Jogador jogador,
         string placeId,
@@ -1035,7 +1476,15 @@ public class JogadoresController : ControllerBase
         if (string.Equals(categoria, PlaceCategoryMapper.CategoryShopping, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(subcategoria, PlaceCategoryMapper.SpecialBossSubcategory, StringComparison.OrdinalIgnoreCase))
         {
-            estoqueInicialJson = "{\"slots\":10,\"reabastecimento\":false}";
+            estoqueInicialJson = "{\"tipo\":\"equipamentos\",\"slots\":10,\"reabastecimento\":false}";
+        }
+        else if (string.Equals(categoria, PlaceCategoryMapper.CategoryFoodAndDrink, StringComparison.OrdinalIgnoreCase))
+        {
+            estoqueInicialJson = "{\"tipo\":\"consumiveis\",\"slots\":10,\"reabastecimento\":false}";
+        }
+        else if (string.Equals(categoria, PlaceCategoryMapper.CategoryServices, StringComparison.OrdinalIgnoreCase))
+        {
+            estoqueInicialJson = "{\"tipo\":\"buffs\",\"custoMoedas\":50,\"wip\":true}";
         }
 
         var novoEstado = new EstadoPermanentePlace

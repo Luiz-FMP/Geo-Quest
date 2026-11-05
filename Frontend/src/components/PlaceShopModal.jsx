@@ -3,56 +3,282 @@ import {
   getItemPlaceholder,
   getRarityVisual,
 } from "../config/placeholderAssets";
+import {
+  ALLOWED_CATEGORIES,
+  getTranslatedSubcategory,
+} from "../utils/placeCategories";
 import { FullScreenMenuCloseButton } from "./PlayerBottomMenu";
 
 const TOTAL_SHOP_SLOTS = 10;
 const TOTAL_BACKPACK_SLOTS = 50;
 
-const SHOP_PLACEHOLDER_SLOTS = Array.from({ length: TOTAL_SHOP_SLOTS }).map(
-  (_, idx) => ({
+/**
+ * Gera os 10 espaços estruturais superiores preparados para receber futuramente
+ * equipamentos (Shopping) ou consumíveis (Food and Drink), sem criar produtos fictícios
+ * nem realizar transações reais.
+ */
+function buildPreparedShopSlots(shopCategory) {
+  const isConsumableShop = shopCategory === ALLOWED_CATEGORIES.FOOD_AND_DRINK;
+  const slotPrefix = isConsumableShop ? "CONS" : "EQUIP";
+
+  return Array.from({ length: TOTAL_SHOP_SLOTS }).map((_, idx) => ({
     slotNumber: idx + 1,
-    code: `SLOT-${String(idx + 1).padStart(2, "0")}`,
-    name: `Produto Placeholder #${idx + 1}`,
+    code: `${slotPrefix}-${String(idx + 1).padStart(2, "0")}`,
+    name: isConsumableShop
+      ? `Espaço de Consumível #${idx + 1}`
+      : `Espaço de Equipamento #${idx + 1}`,
     price: 0,
     description: "WIP",
     placeholderKey: "item_placeholder",
-  }),
-);
+    catalogType: isConsumableShop ? "Consumivel" : "Equipavel",
+  }));
+}
 
 /**
- * Interface da Loja (Categoria: Shopping, exceto shopping_mall).
- * Segue a especificação da Seção 11:
- * - Parte superior: barra horizontal com 10 slots maiores que os da mochila, placeholder visual e preço 0 logo abaixo.
- * - Parte inferior: área da mochila (5x10) reutilizando a estrutura visual do inventário.
- * - Seleção de produto: pequeno menu com placeholder, identificação do slot, preço 0, descrição WIP e área de confirmação de compra sem realizar transação.
+ * Configuração modular das lojas por categoria (Seção 3):
+ * - Shopping: Loja de equipamentos (inventário inferior apenas de Equipamentos).
+ * - Food and Drink: Loja de consumíveis (inventário inferior apenas de Consumíveis).
+ * - Services: Loja de buffs (interface estilo hospedagem, custo 50g, estado WIP).
  */
+const SHOP_CATEGORY_CONFIG = {
+  [ALLOWED_CATEGORIES.SHOPPING]: {
+    badgeLabel: "Shopping • Loja de Equipamentos",
+    topSectionTitle: "Espaços de Equipamentos Disponíveis",
+    topSectionSubtitle:
+      "Estrutura preparada para equipamentos futuros (sem itens à venda nesta etapa)",
+    inventoryTab: "Equipavel",
+    inventoryLabel: "Inventário de Equipamentos",
+    inventorySectionSubtitle:
+      "Parte Inferior • Inventário de Equipamentos do Jogador (5×10 • 50 Slots)",
+  },
+  [ALLOWED_CATEGORIES.FOOD_AND_DRINK]: {
+    badgeLabel: "Food and Drink • Loja de Consumíveis",
+    topSectionTitle: "Espaços de Consumíveis Disponíveis",
+    topSectionSubtitle:
+      "Estrutura preparada para consumíveis futuros (sem itens à venda nesta etapa)",
+    inventoryTab: "Consumivel",
+    inventoryLabel: "Inventário de Consumíveis",
+    inventorySectionSubtitle:
+      "Parte Inferior • Inventário de Consumíveis do Jogador (5×10 • 50 Slots)",
+  },
+  [ALLOWED_CATEGORIES.SERVICES]: {
+    badgeLabel: "Services • Loja de Buffs",
+    defaultBuffCostCoins: 50,
+    defaultDescription:
+      "Estabelecimento especializado em serviços que concedem aprimoramentos temporários (buffs) ao explorador.",
+  },
+};
+
 export default function PlaceShopModal({ place, playerState, onClose }) {
   const [selectedShopSlot, setSelectedShopSlot] = useState(null);
-  const [activeBackpackTab, setActiveBackpackTab] = useState("Equipavel");
   const [purchaseNotice, setPurchaseNotice] = useState(null);
+  const [serviceBuffWipNotice, setServiceBuffWipNotice] = useState(null);
+
+  const category = place?.category || ALLOWED_CATEGORIES.SHOPPING;
+  const isServicesBuffShop = category === ALLOWED_CATEGORIES.SERVICES;
+  const isFoodAndDrinkShop = category === ALLOWED_CATEGORIES.FOOD_AND_DRINK;
+
+  const shopConfig =
+    SHOP_CATEGORY_CONFIG[category] ||
+    SHOP_CATEGORY_CONFIG[ALLOWED_CATEGORIES.SHOPPING];
+
+  const translatedSubcategory = getTranslatedSubcategory(
+    place?.subcategory,
+    category,
+  );
 
   const moedas = playerState?.moedas ?? playerState?.atributos?.moedas ?? 0;
   const mochilaItems = Array.isArray(playerState?.mochila)
     ? playerState.mochila
     : [];
 
-  const itemsInActiveTab = mochilaItems.filter(
+  // Shopping utiliza exclusivamente o inventário de equipamentos ("Equipavel")
+  // Food and Drink utiliza exclusivamente o inventário de consumíveis ("Consumivel")
+  const targetInventoryCategory = isFoodAndDrinkShop
+    ? "Consumivel"
+    : "Equipavel";
+
+  const itemsInShopInventory = mochilaItems.filter(
     (item) =>
       (item.categoriaAba || item.categoria || "Equipavel").toLowerCase() ===
-      activeBackpackTab.toLowerCase(),
+      targetInventoryCategory.toLowerCase(),
   );
 
-  const countEquipaveis = mochilaItems.filter(
-    (i) => (i.categoriaAba || i.categoria || "Equipavel") === "Equipavel",
-  ).length;
-
-  const countConsumiveis = mochilaItems.filter(
-    (i) => (i.categoriaAba || i.categoria) === "Consumivel",
-  ).length;
+  const preparedShopSlots = buildPreparedShopSlots(category);
 
   function findItemAtSlot(slotIndex) {
     return (
-      itemsInActiveTab.find((item) => item.slotIndice === slotIndex) || null
+      itemsInShopInventory.find((item) => item.slotIndice === slotIndex) || null
+    );
+  }
+
+  // Seção 3.3: Services — Loja de buffs com interface semelhante à hospedagem
+  if (isServicesBuffShop) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Loja de Buffs — ${place?.name || "Services"}`}
+        data-testid="place-services-buff-modal"
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10, 14, 11, 0.78)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1180,
+          padding: 20,
+        }}
+      >
+        <div
+          style={{
+            background: "#1B241D",
+            border: "1px solid #8B5CF6",
+            borderRadius: 12,
+            maxWidth: 460,
+            width: "100%",
+            padding: "24px",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.65)",
+            color: "#EDE6D3",
+            textAlign: "left",
+            position: "relative",
+          }}
+        >
+          <button
+            type="button"
+            aria-label="Fechar loja de buffs"
+            onClick={onClose}
+            style={{
+              position: "absolute",
+              top: 14,
+              right: 14,
+              background: "transparent",
+              border: "1px solid #2E3B30",
+              borderRadius: 6,
+              color: "#8A9A8C",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              padding: "4px 8px",
+              cursor: "pointer",
+            }}
+          >
+            ✕
+          </button>
+
+          <h3
+            data-testid="services-shop-name"
+            style={{
+              margin: "0 32px 6px 0",
+              fontSize: 22,
+              fontWeight: 700,
+              color: "#EDE6D3",
+              lineHeight: 1.25,
+            }}
+          >
+            {place?.name || "Serviço Local"}
+          </h3>
+
+          <div
+            data-testid="services-shop-subcategory"
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              color: "#C4B5FD",
+              marginBottom: 12,
+            }}
+          >
+            {translatedSubcategory} • Categoria: {category}
+          </div>
+
+          <div
+            data-testid="services-shop-description"
+            style={{
+              padding: "12px 14px",
+              background: "#131915",
+              border: "1px dashed #3A4A3C",
+              borderRadius: 8,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              color: "#9CAEA0",
+              marginBottom: 14,
+              lineHeight: 1.5,
+            }}
+          >
+            {shopConfig.defaultDescription}
+          </div>
+
+          <div
+            data-testid="services-buff-status-panel"
+            style={{
+              padding: "10px 12px",
+              background: "#131D17",
+              border: "1px solid #26332A",
+              borderRadius: 8,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 11,
+              color: "#EDE6D3",
+              marginBottom: 14,
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div>
+              Saldo atual:{" "}
+              <strong style={{ color: "#FBBF24" }}>{moedas}g</strong>
+            </div>
+            <div>
+              Serviço disponível: <strong>Aprimoramento temporário (Buff)</strong>{" "}
+              • Custo: <strong>50 moedas (50g)</strong>
+            </div>
+          </div>
+
+          {serviceBuffWipNotice && (
+            <div
+              data-testid="services-buff-wip-notice"
+              style={{
+                padding: "10px 12px",
+                background: "rgba(245, 158, 11, 0.14)",
+                border: "1px solid #F59E0B",
+                borderRadius: 8,
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11,
+                color: "#FCD34D",
+                marginBottom: 14,
+                lineHeight: 1.45,
+              }}
+            >
+              {serviceBuffWipNotice}
+            </div>
+          )}
+
+          <button
+            type="button"
+            data-testid="services-buy-buff-btn"
+            onClick={() =>
+              setServiceBuffWipNotice(
+                "WIP — O sistema de buffs temporários ainda está em desenvolvimento. Nenhuma moeda foi descontada e nenhum atributo foi modificado.",
+              )
+            }
+            style={{
+              width: "100%",
+              padding: "12px 18px",
+              background: "#6D28D9",
+              border: "1px solid #C4B5FD",
+              borderRadius: 6,
+              color: "#FFFFFF",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontWeight: 700,
+              fontSize: 13,
+              letterSpacing: "0.05em",
+              cursor: "pointer",
+            }}
+          >
+            COMPRAR APRIMORAMENTO TEMPORÁRIO (50g)
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -60,8 +286,9 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Loja — ${place?.name || "Shopping"}`}
+      aria-label={`Loja — ${place?.name || category}`}
       data-testid="place-shop-modal"
+      data-shop-category={category}
       style={{
         position: "fixed",
         inset: 0,
@@ -102,19 +329,30 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
         >
           <div>
             <span
+              data-testid="shop-category-header-badge"
               style={{
                 fontFamily: "'IBM Plex Mono', monospace",
                 fontSize: 11,
-                color: "#06B6D4",
+                color: isFoodAndDrinkShop ? "#F97316" : "#06B6D4",
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
               }}
             >
-              Shopping • Loja do Local
+              {shopConfig.badgeLabel}
             </span>
             <h2 style={{ margin: "2px 0 0 0", fontSize: 26, fontWeight: 700 }}>
               {place?.name || "Loja"}
             </h2>
+            <div
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11,
+                color: "#8A9A8C",
+                marginTop: 2,
+              }}
+            >
+              {translatedSubcategory}
+            </div>
           </div>
 
           <div
@@ -136,7 +374,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
           </div>
         </header>
 
-        {/* PARTE SUPERIOR: Barra horizontal contendo 10 slots maiores que os da mochila + preço em moedas abaixo */}
+        {/* PARTE SUPERIOR: Barra horizontal contendo 10 espaços preparados para produtos disponíveis */}
         <section
           aria-label="Produtos da Loja"
           style={{
@@ -170,7 +408,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
                 Parte Superior • Vitrine da Loja (10 Slots)
               </span>
               <h3 style={{ margin: "4px 0 0 0", fontSize: 18 }}>
-                Produtos Disponíveis (Placeholders)
+                {shopConfig.topSectionTitle}
               </h3>
             </div>
             <span
@@ -180,7 +418,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
                 color: "#8A9A8C",
               }}
             >
-              Clique em um slot para inspecionar o produto
+              {shopConfig.topSectionSubtitle}
             </span>
           </div>
 
@@ -197,7 +435,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
               border: "1px solid #26332A",
             }}
           >
-            {SHOP_PLACEHOLDER_SLOTS.map((product) => {
+            {preparedShopSlots.map((product) => {
               const isSelected =
                 selectedShopSlot?.slotNumber === product.slotNumber;
               const visual = getItemPlaceholder(product.placeholderKey);
@@ -298,9 +536,9 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
           </div>
         </section>
 
-        {/* PARTE INFERIOR: Área semelhante à mochila do inventário */}
+        {/* PARTE INFERIOR: Inventário específico da categoria da loja (Equipamentos para Shopping, Consumíveis para Food and Drink) */}
         <section
-          aria-label="Mochila do Jogador na Loja"
+          aria-label={shopConfig.inventoryLabel}
           style={{
             background: "#18201A",
             border: "1px solid #2E3B30",
@@ -329,57 +567,38 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
                   textTransform: "uppercase",
                 }}
               >
-                Parte Inferior • Mochila do Jogador (5×10 • 50 Slots)
+                {shopConfig.inventorySectionSubtitle}
               </span>
-              <h3 style={{ margin: "4px 0 0 0", fontSize: 18 }}>
-                Mochila do Inventário
+              <h3
+                data-testid="shop-bottom-inventory-title"
+                style={{ margin: "4px 0 0 0", fontSize: 18 }}
+              >
+                {shopConfig.inventoryLabel}
               </h3>
             </div>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setActiveBackpackTab("Equipavel")}
-                style={{
-                  padding: "7px 12px",
-                  background:
-                    activeBackpackTab === "Equipavel" ? "#C89B5C" : "#121814",
-                  border: "1px solid #C89B5C",
-                  borderRadius: 6,
-                  color:
-                    activeBackpackTab === "Equipavel" ? "#161D18" : "#EDE6D3",
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Equipáveis ({countEquipaveis})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveBackpackTab("Consumivel")}
-                style={{
-                  padding: "7px 12px",
-                  background:
-                    activeBackpackTab === "Consumivel" ? "#C89B5C" : "#121814",
-                  border: "1px solid #C89B5C",
-                  borderRadius: 6,
-                  color:
-                    activeBackpackTab === "Consumivel" ? "#161D18" : "#EDE6D3",
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Consumíveis ({countConsumiveis})
-              </button>
+            <div
+              data-testid="shop-active-inventory-badge"
+              style={{
+                padding: "7px 12px",
+                background: "#C89B5C",
+                border: "1px solid #C89B5C",
+                borderRadius: 6,
+                color: "#161D18",
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {isFoodAndDrinkShop
+                ? `Consumíveis (${itemsInShopInventory.length})`
+                : `Equipamentos (${itemsInShopInventory.length})`}
             </div>
           </div>
 
           <div
             data-testid="shop-backpack-grid"
+            data-inventory-type={targetInventoryCategory}
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(10, minmax(42px, 1fr))",
@@ -467,7 +686,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
         </section>
       </div>
 
-      {/* Submenu de Seleção de Produto (Seção 11.2) */}
+      {/* Submenu de Seleção de Espaço de Produto */}
       {selectedShopSlot && (
         <div
           role="dialog"
@@ -515,7 +734,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
                   textTransform: "uppercase",
                 }}
               >
-                Seleção de Produto • Slot #{selectedShopSlot.slotNumber}
+                Seleção de Espaço • Slot #{selectedShopSlot.slotNumber}
               </span>
               <button
                 type="button"
@@ -535,7 +754,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
               </button>
             </div>
 
-            {/* Placeholder do Produto + Nome/Identificação + Preço */}
             <div
               style={{
                 display: "flex",
@@ -590,7 +808,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
               </div>
             </div>
 
-            {/* Descrição: WIP */}
             <div
               style={{
                 padding: "10px 12px",
@@ -606,7 +823,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
               desenvolvimento.
             </div>
 
-            {/* Área para confirmação de compra (preparada visualmente, sem transação real) */}
             <div
               style={{
                 background: "#141B16",
@@ -691,4 +907,3 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
     </div>
   );
 }
-

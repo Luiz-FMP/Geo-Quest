@@ -67,5 +67,73 @@ public class PlacesController : ControllerBase
             places = result.Places
         });
     }
-}
 
+    [HttpGet("transport-destinations")]
+    public async Task<IActionResult> GetTransportDestinations(
+        [FromQuery] double? lat,
+        [FromQuery] double? lng,
+        [FromQuery] string? type,
+        [FromQuery] string? excludePlaceId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (lat is null || lng is null || double.IsNaN(lat.Value) || double.IsNaN(lng.Value))
+        {
+            return BadRequest(new
+            {
+                error = "INVALID_COORDINATES",
+                message = "Latitude e longitude de origem são obrigatórias."
+            });
+        }
+
+        if (lat.Value < -90 || lat.Value > 90 || lng.Value < -180 || lng.Value > 180)
+        {
+            return BadRequest(new
+            {
+                error = "OUT_OF_RANGE_COORDINATES",
+                message = "Coordenadas fora do intervalo válido (-90..90, -180..180)."
+            });
+        }
+
+        var normalizedType = (type ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalizedType is not ("airport" or "bus_station"))
+        {
+            return BadRequest(new
+            {
+                error = "INVALID_TRANSPORT_TYPE",
+                message = "O tipo de transporte deve ser 'airport' ou 'bus_station'."
+            });
+        }
+
+        var result = await _placesClient.SearchTransportDestinationsAsync(
+            lat.Value,
+            lng.Value,
+            normalizedType,
+            excludePlaceId,
+            cancellationToken
+        );
+
+        if (!result.IsSuccess)
+        {
+            var statusCode = result.ErrorCode == "MISSING_API_KEY"
+                ? StatusCodes.Status503ServiceUnavailable
+                : StatusCodes.Status502BadGateway;
+
+            return StatusCode(statusCode, new
+            {
+                error = result.ErrorCode,
+                message = result.ErrorMessage
+            });
+        }
+
+        return Ok(new
+        {
+            transportType = result.TransportType,
+            radiusMetersUsed = result.RadiusMetersUsed,
+            count = result.Destinations.Count,
+            destinations = result.Destinations,
+            message = result.Destinations.Count == 0
+                ? "Não existem pontos de transporte semelhantes encontrados na região pesquisada."
+                : null
+        });
+    }
+}

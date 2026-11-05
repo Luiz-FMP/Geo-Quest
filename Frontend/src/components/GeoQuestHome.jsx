@@ -17,6 +17,9 @@ import {
   registrarVisitaPlaceJogador,
   removerItemInventario,
   retornarParaCheckpointJogador,
+  treinarSportsJogador,
+  vasculharNaturalFeatureJogador,
+  viajarTransporteJogador,
 } from "../services/playerApi";
 import CharacterSelectScreen from "./CharacterSelectScreen";
 import GoogleMapDemo from "./GoogleMapDemo";
@@ -29,6 +32,7 @@ export default function GeoQuestHome() {
   const [locationError, setLocationError] = useState(null);
   const [playerState, setPlayerState] = useState(null);
   const [blink, setBlink] = useState(true);
+  const [isTransportMapOpen, setIsTransportMapOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -68,7 +72,11 @@ export default function GeoQuestHome() {
 
   const handleUpdatePlayerHp = useCallback(
     async (novaVida, novaEnergia = null, novasMoedas = null) => {
-      const updated = await atualizarVidaJogador(novaVida, novaEnergia, novasMoedas);
+      const updated = await atualizarVidaJogador(
+        novaVida,
+        novaEnergia,
+        novasMoedas,
+      );
       setPlayerState(updated);
       return updated;
     },
@@ -126,6 +134,67 @@ export default function GeoQuestHome() {
     return updated;
   }, []);
 
+  const handleExploreNaturalFeature = useCallback(
+    async (place, interacaoId) => {
+      const response = await vasculharNaturalFeatureJogador({
+        placeId: place.id,
+        nome: place.name,
+        subcategoria: place.subcategory || "woods",
+        latitude: place.lat,
+        longitude: place.lng,
+        interacaoId,
+      });
+      if (response?.jogador) {
+        setPlayerState(response.jogador);
+      }
+      return response;
+    },
+    [],
+  );
+
+  const handleTrainSports = useCallback(async (place, opcao, interacaoId) => {
+    const response = await treinarSportsJogador({
+      placeId: place.id,
+      nome: place.name,
+      subcategoria: place.subcategory || "gym",
+      latitude: place.lat,
+      longitude: place.lng,
+      opcaoAtributo: opcao,
+      opcao,
+      interacaoId,
+    });
+    if (response?.jogador) {
+      setPlayerState(response.jogador);
+    }
+    return response;
+  }, []);
+
+  const handleTravelTransport = useCallback(
+    async (originPlace, destinationPlace) => {
+      const subcategoria =
+        destinationPlace.subcategory || originPlace.subcategory || "bus_station";
+      const response = await viajarTransporteJogador({
+        origemPlaceId: originPlace.id,
+        origemNome: originPlace.name,
+        origemSubcategoria: originPlace.subcategory,
+        origemLatitude: originPlace.lat,
+        origemLongitude: originPlace.lng,
+        destinoPlaceId: destinationPlace.id,
+        destinoNome: destinationPlace.name,
+        subcategoria,
+        destinoSubcategoria: subcategoria,
+        destinoLatitude: destinationPlace.lat,
+        destinoLongitude: destinationPlace.lng,
+        distanciaKm: destinationPlace.distanceKm,
+      });
+      if (response?.jogador) {
+        setPlayerState(response.jogador);
+      }
+      return response;
+    },
+    [],
+  );
+
   const handleCompleteCombatPlace = useCallback(async (payload) => {
     const updated = await concluirCombateLocalJogador(payload);
     setPlayerState(updated);
@@ -140,11 +209,18 @@ export default function GeoQuestHome() {
     return response;
   }, []);
 
-  const handleMoveItem = useCallback(async (inventarioId, novoSlotIndice, abaDestino) => {
-    const updated = await moverItemInventario(inventarioId, novoSlotIndice, abaDestino);
-    setPlayerState(updated);
-    return updated;
-  }, []);
+  const handleMoveItem = useCallback(
+    async (inventarioId, novoSlotIndice, abaDestino) => {
+      const updated = await moverItemInventario(
+        inventarioId,
+        novoSlotIndice,
+        abaDestino,
+      );
+      setPlayerState(updated);
+      return updated;
+    },
+    [],
+  );
 
   const handleDeleteItem = useCallback(async (inventarioId) => {
     const updated = await removerItemInventario(inventarioId);
@@ -152,17 +228,26 @@ export default function GeoQuestHome() {
     return updated;
   }, []);
 
-  const handleEquipItem = useCallback(async (inventarioId, slotEquipamento) => {
-    const updated = await equiparItemJogador(inventarioId, slotEquipamento);
-    setPlayerState(updated);
-    return updated;
-  }, []);
+  const handleEquipItem = useCallback(
+    async (inventarioId, slotEquipamento) => {
+      const updated = await equiparItemJogador(inventarioId, slotEquipamento);
+      setPlayerState(updated);
+      return updated;
+    },
+    [],
+  );
 
-  const handleUnequipItem = useCallback(async (slotEquipamento, slotMochilaDestino) => {
-    const updated = await desequiparItemJogador(slotEquipamento, slotMochilaDestino);
-    setPlayerState(updated);
-    return updated;
-  }, []);
+  const handleUnequipItem = useCallback(
+    async (slotEquipamento, slotMochilaDestino) => {
+      const updated = await desequiparItemJogador(
+        slotEquipamento,
+        slotMochilaDestino,
+      );
+      setPlayerState(updated);
+      return updated;
+    },
+    [],
+  );
 
   const handleSpawnDebugItem = useCallback(async () => {
     const updated = await gerarItemDebugInventario();
@@ -209,7 +294,9 @@ export default function GeoQuestHome() {
           Number.isNaN(latitude) ||
           Number.isNaN(longitude)
         ) {
-          setLocationError("Dados de localização incompletos retornados pelo navegador.");
+          setLocationError(
+            "Dados de localização incompletos retornados pelo navegador.",
+          );
           setIsLoadingLocation(false);
           return;
         }
@@ -233,9 +320,11 @@ export default function GeoQuestHome() {
           message =
             "Acesso à localização negado. Permita o uso da localização no navegador para iniciar o jogo.";
         } else if (error?.code === 2) {
-          message = "Localização indisponível no momento. Verifique o GPS/rede do dispositivo.";
+          message =
+            "Localização indisponível no momento. Verifique o GPS/rede do dispositivo.";
         } else if (error?.code === 3) {
-          message = "Tempo limite esgotado ao obter sua localização. Tente novamente.";
+          message =
+            "Tempo limite esgotado ao obter sua localização. Tente novamente.";
         }
 
         setLocationError(message);
@@ -271,22 +360,28 @@ export default function GeoQuestHome() {
           onHospitalHeal={handleHospitalHeal}
           onLodgingRest={handleLodgingRest}
           onHomeRest={handleHomeRest}
+          onExploreNaturalFeature={handleExploreNaturalFeature}
+          onTrainSports={handleTrainSports}
+          onTravelTransport={handleTravelTransport}
+          onTransportModeChange={setIsTransportMapOpen}
           onCompleteCombatPlace={handleCompleteCombatPlace}
           onReturnToCheckpoint={handleReturnToCheckpoint}
           onExitToMenu={() => setScreen("menu")}
         />
-        <PlayerSystemsOverlay
-          playerState={playerState}
-          coords={coords}
-          onUpdateName={handleUpdateName}
-          onChangeCharacter={handleChangeCharacter}
-          onUpdatePlayerHp={handleUpdatePlayerHp}
-          onMoveItem={handleMoveItem}
-          onDeleteItem={handleDeleteItem}
-          onEquipItem={handleEquipItem}
-          onUnequipItem={handleUnequipItem}
-          onSpawnDebugItem={handleSpawnDebugItem}
-        />
+        {!isTransportMapOpen && (
+          <PlayerSystemsOverlay
+            playerState={playerState}
+            coords={coords}
+            onUpdateName={handleUpdateName}
+            onChangeCharacter={handleChangeCharacter}
+            onUpdatePlayerHp={handleUpdatePlayerHp}
+            onMoveItem={handleMoveItem}
+            onDeleteItem={handleDeleteItem}
+            onEquipItem={handleEquipItem}
+            onUnequipItem={handleUnequipItem}
+            onSpawnDebugItem={handleSpawnDebugItem}
+          />
+        )}
       </>
     );
   }
@@ -359,7 +454,8 @@ export default function GeoQuestHome() {
             position: "absolute",
             top: 20,
             left: 24,
-            fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
+            fontFamily:
+              "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
             fontSize: 11,
             color: "#C89B5C",
             zIndex: 3,
@@ -368,7 +464,9 @@ export default function GeoQuestHome() {
           JOGADOR: <strong>{playerState.nome}</strong> •{" "}
           {playerState.personagemAtual?.nome || "Explorador #1"} • PODER:{" "}
           <strong>{playerState.atributos?.nivelDePoder ?? 10}</strong> • MOEDAS:{" "}
-          <strong>{playerState.moedas ?? playerState.atributos?.moedas ?? 0}</strong>
+          <strong>
+            {playerState.moedas ?? playerState.atributos?.moedas ?? 0}
+          </strong>
         </div>
       )}
 
@@ -449,9 +547,28 @@ export default function GeoQuestHome() {
             width: "100%",
           }}
         >
-          <svg width="86" height="86" viewBox="0 0 86 86" style={{ marginBottom: 8 }}>
-            <circle cx="43" cy="43" r="41" fill="none" stroke="#3A4A3C" strokeWidth="1" />
-            <circle cx="43" cy="43" r="30" fill="none" stroke="#3A4A3C" strokeWidth="0.75" />
+          <svg
+            width="86"
+            height="86"
+            viewBox="0 0 86 86"
+            style={{ marginBottom: 8 }}
+          >
+            <circle
+              cx="43"
+              cy="43"
+              r="41"
+              fill="none"
+              stroke="#3A4A3C"
+              strokeWidth="1"
+            />
+            <circle
+              cx="43"
+              cy="43"
+              r="30"
+              fill="none"
+              stroke="#3A4A3C"
+              strokeWidth="0.75"
+            />
             {[0, 90, 180, 270].map((degree) => (
               <line
                 key={degree}
@@ -464,7 +581,11 @@ export default function GeoQuestHome() {
                 opacity="0.7"
               />
             ))}
-            <polygon points="43,10 48,43 43,76 38,43" fill="#C89B5C" opacity="0.9" />
+            <polygon
+              points="43,10 48,43 43,76 38,43"
+              fill="#C89B5C"
+              opacity="0.9"
+            />
             <text
               x="43"
               y="8"
@@ -495,7 +616,8 @@ export default function GeoQuestHome() {
             style={{
               marginTop: 10,
               marginBottom: 32,
-              fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
+              fontFamily:
+                "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
               fontSize: 12,
               color: "#7C8C7E",
               letterSpacing: "0.08em",
@@ -566,7 +688,8 @@ export default function GeoQuestHome() {
                   borderTop: index === 0 ? "1px solid #2E3B30" : "none",
                   borderBottom: "1px solid #2E3B30",
                   padding: "18px 4px",
-                  cursor: item.enabled && !isLoadingLocation ? "pointer" : "default",
+                  cursor:
+                    item.enabled && !isLoadingLocation ? "pointer" : "default",
                   color: item.enabled ? "#EDE6D3" : "#5C6B5E",
                   opacity: item.enabled ? 1 : 0.6,
                   textAlign: "left",
@@ -575,13 +698,15 @@ export default function GeoQuestHome() {
                   if (!item.enabled) return;
                   event.currentTarget.style.borderTopColor = "#C89B5C";
                   event.currentTarget.style.borderBottomColor = "#C89B5C";
-                  event.currentTarget.querySelector(".label").style.color = "#C89B5C";
+                  event.currentTarget.querySelector(".label").style.color =
+                    "#C89B5C";
                 }}
                 onMouseLeave={(event) => {
                   if (!item.enabled) return;
                   event.currentTarget.style.borderTopColor = "#2E3B30";
                   event.currentTarget.style.borderBottomColor = "#2E3B30";
-                  event.currentTarget.querySelector(".label").style.color = "#EDE6D3";
+                  event.currentTarget.querySelector(".label").style.color =
+                    "#EDE6D3";
                 }}
               >
                 <span
@@ -597,7 +722,8 @@ export default function GeoQuestHome() {
 
                 <span
                   style={{
-                    fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
+                    fontFamily:
+                      "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
                     fontSize: 11,
                     color: "#5C6B5E",
                     letterSpacing: "0.04em",
