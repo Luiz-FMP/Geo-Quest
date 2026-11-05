@@ -1,12 +1,4 @@
-import React from "react";
 import CharacterAnimatedSprite from "./CharacterAnimatedSprite";
-
-const CORES_PERSONAGEM = {
-  Miguel: { cor: "#38BDF8", bg: "#112233", codigo: "EXP-01" },
-  Amélia: { cor: "#34D399", bg: "#112A22", codigo: "CRT-02" },
-  Benjamin: { cor: "#FBBF24", bg: "#2B2111", codigo: "GBD-03" },
-  Z: { cor: "#60A5FA", bg: "#151F38", codigo: "EXP-01" },
-};
 
 export default function CombatArena({
   personagem,
@@ -19,12 +11,6 @@ export default function CombatArena({
   alvoIndex,
   onSelectAlvo,
 }) {
-  const temaChar = CORES_PERSONAGEM[personagem.nome] || {
-    cor: "#38BDF8",
-    bg: "#112233",
-    codigo: personagem.placeholderKey || "EXP-01",
-  };
-
   const hpMaxJogador = personagem.vida || 50;
   const peMaxJogador = personagem.energia || 100;
 

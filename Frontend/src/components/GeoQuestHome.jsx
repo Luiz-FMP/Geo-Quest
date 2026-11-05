@@ -23,6 +23,11 @@ import {
   vasculharNaturalFeatureJogador,
   viajarTransporteJogador,
 } from "../services/playerApi";
+import {
+  ERRO_GEOLOCALIZACAO_INVALIDA,
+  obterLocalizacaoPrecisa,
+  PRECISAO_BAIXA_METROS,
+} from "../utils/geolocation";
 import CharacterSelectScreen from "./CharacterSelectScreen";
 import GoogleMapDemo from "./GoogleMapDemo";
 import PlayerSystemsOverlay from "./PlayerSystemsOverlay";
@@ -111,29 +116,17 @@ export default function GeoQuestHome() {
 
       // Quando desativado durante uma sessão ativa, volta a obter a localização real do dispositivo
       if (coords && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            const latitude = position?.coords?.latitude;
-            const longitude = position?.coords?.longitude;
-            if (
-              typeof latitude === "number" &&
-              typeof longitude === "number" &&
-              !Number.isNaN(latitude) &&
-              !Number.isNaN(longitude)
-            ) {
-              setCoords({ lat: latitude, lng: longitude });
-              try {
-                await handleDefineHome(latitude, longitude, true);
-              } catch {
-                // Ignora falha de sincronização com servidor
-              }
-            }
-          },
-          () => {
-            // Se falhar em segundo plano ao desativar debug, preserva mensagem de erro na próxima tentativa de sessão
-          },
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-        );
+        try {
+          const { latitude, longitude } = await obterLocalizacaoPrecisa();
+          setCoords({ lat: latitude, lng: longitude });
+          try {
+            await handleDefineHome(latitude, longitude, true);
+          } catch {
+            // Ignora falha de sincronização com servidor
+          }
+        } catch {
+          // Se falhar em segundo plano ao desativar debug, preserva mensagem de erro na próxima tentativa de sessão
+        }
       }
     },
     [coords, handleDefineHome],
@@ -365,63 +358,50 @@ export default function GeoQuestHome() {
 
     setIsLoadingLocation(true);
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const latitude = position?.coords?.latitude;
-        const longitude = position?.coords?.longitude;
+    let leitura;
+    try {
+      // Amostra as leituras por alguns segundos e usa a mais precisa (evita a 1ª leitura aproximada por IP).
+      leitura = await obterLocalizacaoPrecisa();
+    } catch (error) {
+      let message = "Não foi possível obter sua localização.";
+      if (error?.code === 1) {
+        message =
+          "Acesso à localização negado. Permita o uso da localização no navegador para iniciar o jogo.";
+      } else if (error?.code === 2) {
+        message =
+          "Localização indisponível no momento. Verifique o GPS/rede do dispositivo.";
+      } else if (error?.code === 3) {
+        message =
+          "Tempo limite esgotado ao obter sua localização. Tente novamente.";
+      } else if (error?.code === ERRO_GEOLOCALIZACAO_INVALIDA) {
+        message =
+          "Dados de localização incompletos ou inválidos retornados pelo navegador.";
+      }
 
-        if (
-          typeof latitude !== "number" ||
-          typeof longitude !== "number" ||
-          Number.isNaN(latitude) ||
-          Number.isNaN(longitude) ||
-          latitude < -90 ||
-          latitude > 90 ||
-          longitude < -180 ||
-          longitude > 180
-        ) {
-          setLocationError(
-            "Dados de localização incompletos ou inválidos retornados pelo navegador.",
-          );
-          setIsLoadingLocation(false);
-          return;
-        }
+      setLocationError(message);
+      setIsLoadingLocation(false);
+      return;
+    }
 
-        try {
-          await handleDefineHome(latitude, longitude, true);
-        } catch {
-          // Segue com coordenadas locais se necessário
-        }
+    const { latitude, longitude, accuracy } = leitura;
+    if (accuracy > PRECISAO_BAIXA_METROS) {
+      console.warn(
+        `[GeoQuest] Localização com baixa precisão (~${Math.round(accuracy)} m); o navegador provavelmente estimou por IP/rede.`,
+      );
+    }
 
-        setCoords({
-          lat: latitude,
-          lng: longitude,
-        });
-        setIsLoadingLocation(false);
-        setScreen("character-select");
-      },
-      (error) => {
-        let message = "Não foi possível obter sua localização.";
-        if (error?.code === 1) {
-          message =
-            "Acesso à localização negado. Permita o uso da localização no navegador para iniciar o jogo.";
-        } else if (error?.code === 2) {
-          message =
-            "Localização indisponível no momento. Verifique o GPS/rede do dispositivo.";
-        } else if (error?.code === 3) {
-          message =
-            "Tempo limite esgotado ao obter sua localização. Tente novamente.";
-        }
+    try {
+      await handleDefineHome(latitude, longitude, true);
+    } catch {
+      // Segue com coordenadas locais se necessário
+    }
 
-        setLocationError(message);
-        setIsLoadingLocation(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 12000,
-        maximumAge: 0,
-      },
-    );
+    setCoords({
+      lat: latitude,
+      lng: longitude,
+    });
+    setIsLoadingLocation(false);
+    setScreen("character-select");
   }
 
   const currentCharacterObj = playerState?.personagemAtual

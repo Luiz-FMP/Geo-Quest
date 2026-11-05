@@ -32,8 +32,10 @@ const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v2";
 const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
 const PROGRESSIVE_TRANSPORT_RADII_METERS = [5000, 15000, 30000, 50000];
-const ADEQUATE_TRANSPORT_DESTINATIONS = 5;
-const MAX_TRANSPORT_DESTINATIONS = 20;
+// A busca de transporte acumula destinos até existir pelo menos um além desta distância.
+const FAR_TRANSPORT_DESTINATION_THRESHOLD_KM = 5;
+// Limite de resultados por consulta da Places API (New) Nearby Search.
+const PLACES_NEARBY_MAX_RESULTS = 20;
 
 const GAME_MAP_STYLES = [
   { elementType: "geometry", stylers: [{ color: "#1d2c22" }] },
@@ -876,9 +878,10 @@ function GameMapContent({
           }
         }
 
-        const ordered = Array.from(dedupedMap.values())
-          .sort((a, b) => a.distanceKm - b.distanceKm)
-          .slice(0, MAX_TRANSPORT_DESTINATIONS);
+        // Sem corte por quantidade: manter só os N mais próximos descartaria os destinos distantes.
+        const ordered = Array.from(dedupedMap.values()).sort(
+          (a, b) => a.distanceKm - b.distanceKm,
+        );
 
         setTransportMode((prev) =>
           prev
@@ -957,10 +960,16 @@ function GameMapContent({
       let lastRadiusUsed = PROGRESSIVE_TRANSPORT_RADII_METERS[0];
       const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
       const searchIncludedTypes = [transportType];
+      // Quando uma consulta por DISTANCE vem cheia (20), ampliar o raio devolve os mesmos 20 vizinhos;
+      // a partir daí usa POPULARITY para alcançar terminais mais distantes.
+      let distanceRankingSaturated = false;
 
       for (const radiusMeters of PROGRESSIVE_TRANSPORT_RADII_METERS) {
         lastRadiusUsed = radiusMeters;
         let radiusBatch = [];
+        const rankPreference = distanceRankingSaturated
+          ? "POPULARITY"
+          : "DISTANCE";
 
         // 2a. Google Places API Nearby Search (New) via SDK (Place.searchNearby)
         if (placesLib && typeof placesLib.Place?.searchNearby === "function") {
@@ -979,8 +988,8 @@ function GameMapContent({
                 radius: radiusMeters,
               },
               includedTypes: searchIncludedTypes,
-              maxResultCount: 20,
-              rankPreference: "DISTANCE",
+              maxResultCount: PLACES_NEARBY_MAX_RESULTS,
+              rankPreference,
             });
 
             if (Array.isArray(sdkPlaces) && sdkPlaces.length > 0) {
@@ -1020,8 +1029,8 @@ function GameMapContent({
                 },
                 body: JSON.stringify({
                   includedTypes: searchIncludedTypes,
-                  maxResultCount: 20,
-                  rankPreference: "DISTANCE",
+                  maxResultCount: PLACES_NEARBY_MAX_RESULTS,
+                  rankPreference,
                   locationRestriction: {
                     circle: {
                       center: {
@@ -1098,6 +1107,13 @@ function GameMapContent({
           }
         }
 
+        if (
+          rankPreference === "DISTANCE" &&
+          radiusBatch.length >= PLACES_NEARBY_MAX_RESULTS
+        ) {
+          distanceRankingSaturated = true;
+        }
+
         for (const candidate of radiusBatch) {
           const norm = normalizeDestinationEntry(candidate);
           if (norm && !collectedById.has(norm.id)) {
@@ -1105,7 +1121,10 @@ function GameMapContent({
           }
         }
 
-        if (collectedById.size >= ADEQUATE_TRANSPORT_DESTINATIONS) {
+        const hasFarDestination = Array.from(collectedById.values()).some(
+          (dest) => dest.distanceKm > FAR_TRANSPORT_DESTINATION_THRESHOLD_KM,
+        );
+        if (hasFarDestination) {
           break;
         }
       }

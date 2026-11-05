@@ -41,12 +41,32 @@ function autoStartDotnetBackendPlugin() {
           ['run', '--urls', 'http://127.0.0.1:5208'],
           {
             cwd: backendDir,
-            stdio: 'ignore',
+            stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
           }
         )
 
-        backendProcess.on('error', () => {
+        // Keep the last lines of output so a startup crash is visible instead of
+        // surfacing only as "ECONNREFUSED 127.0.0.1:5208" proxy errors.
+        const recentOutput = []
+        const collect = (chunk) => {
+          recentOutput.push(...chunk.toString().split(/\r?\n/).filter(Boolean))
+          if (recentOutput.length > 40) recentOutput.splice(0, recentOutput.length - 40)
+        }
+        backendProcess.stdout.on('data', collect)
+        backendProcess.stderr.on('data', collect)
+
+        backendProcess.on('error', (err) => {
+          server.config.logger.error(`[geoquest] Falha ao iniciar o backend (dotnet): ${err.message}`)
+          backendProcess = null
+        })
+
+        backendProcess.on('exit', (code) => {
+          if (code !== 0 && code !== null) {
+            server.config.logger.error(
+              `[geoquest] O backend .NET encerrou com código ${code}. Últimas linhas:\n${recentOutput.join('\n')}`
+            )
+          }
           backendProcess = null
         })
 

@@ -9,8 +9,7 @@ namespace GeoQuest.Api.Integrations;
 public class GooglePlacesClient : IGooglePlacesClient
 {
     private static readonly int[] ProgressiveTransportRadiiMeters = [5000, 15000, 30000, 50000];
-    public const int AdequateTransportDestinationsCount = 5;
-    public const int MaxTransportDestinations = 10;
+    public const double FarTransportDestinationThresholdKm = 5.0;
     public const int MaxPlacesNewQueryCount = 20;
     public const int MaxAllowedRadiusMeters = 50000;
 
@@ -48,6 +47,132 @@ public class GooglePlacesClient : IGooglePlacesClient
             );
         }
 
+        // Places API (New) é o caminho principal: projetos Google Cloud novos não conseguem
+        // habilitar a API legada (retorna REQUEST_DENIED "You're calling a legacy API").
+        var newApiResult = await QueryNearbyPlacesNewAsync(latitude, longitude, radiusMeters, apiKey, cancellationToken);
+        if (newApiResult.IsSuccess)
+        {
+            return newApiResult;
+        }
+
+        _logger.LogWarning(
+            "Places API (New) falhou ({ErrorCode}); tentando a Places API legada.",
+            newApiResult.ErrorCode);
+
+        var legacyResult = await QueryNearbyPlacesLegacyAsync(latitude, longitude, radiusMeters, apiKey, cancellationToken);
+        if (legacyResult.IsSuccess)
+        {
+            return legacyResult;
+        }
+
+        return new PlacesLookupResult(
+            false,
+            Array.Empty<GamePoiDto>(),
+            newApiResult.ErrorCode ?? legacyResult.ErrorCode ?? "PLACES_ERROR",
+            $"{newApiResult.ErrorMessage} (API legada: {legacyResult.ErrorCode})"
+        );
+    }
+
+    private async Task<PlacesLookupResult> QueryNearbyPlacesNewAsync(
+        double latitude,
+        double longitude,
+        int radiusMeters,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        const string url = "https://places.googleapis.com/v1/places:searchNearby";
+        var payload = new
+        {
+            maxResultCount = MaxPlacesNewQueryCount,
+            languageCode = "pt-BR",
+            locationRestriction = new
+            {
+                circle = new
+                {
+                    center = new { latitude, longitude },
+                    radius = (double)Math.Clamp(radiusMeters, 1, MaxAllowedRadiusMeters)
+                }
+            }
+        };
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            request.Headers.TryAddWithoutValidation("X-Goog-Api-Key", apiKey);
+            request.Headers.TryAddWithoutValidation(
+                "X-Goog-FieldMask",
+                "places.id,places.displayName,places.location,places.primaryType,places.types,places.formattedAddress"
+            );
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var statusCode = (int)response.StatusCode;
+                var errorCode = statusCode switch
+                {
+                    403 => "REQUEST_DENIED",
+                    429 => "OVER_QUERY_LIMIT",
+                    _ => "UPSTREAM_HTTP_ERROR"
+                };
+                _logger.LogWarning("Places API (New) retornou HTTP {StatusCode}", statusCode);
+                return new PlacesLookupResult(
+                    false,
+                    Array.Empty<GamePoiDto>(),
+                    errorCode,
+                    $"A Places API (New) retornou HTTP {statusCode}. Verifique se ela está habilitada para a chave."
+                );
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+            var places = new List<GamePoiDto>();
+            if (doc.RootElement.TryGetProperty("places", out var placesEl) && placesEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in placesEl.EnumerateArray())
+                {
+                    var parsed = ParsePlaceNewItem(item, expectedTransportType: null);
+                    if (parsed is not null)
+                    {
+                        places.Add(parsed);
+                    }
+                }
+            }
+
+            // Resposta sem "places" significa zero resultados na Places API (New).
+            return new PlacesLookupResult(true, places);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new PlacesLookupResult(
+                false,
+                Array.Empty<GamePoiDto>(),
+                "TIMEOUT",
+                "Tempo limite esgotado ao buscar pontos de interesse."
+            );
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            _logger.LogWarning(ex, "Erro ao chamar a Places API (New).");
+            return new PlacesLookupResult(
+                false,
+                Array.Empty<GamePoiDto>(),
+                "NETWORK_ERROR",
+                "Erro de rede ao consultar pontos de interesse."
+            );
+        }
+    }
+
+    private async Task<PlacesLookupResult> QueryNearbyPlacesLegacyAsync(
+        double latitude,
+        double longitude,
+        int radiusMeters,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
         var latStr = latitude.ToString(CultureInfo.InvariantCulture);
         var lngStr = longitude.ToString(CultureInfo.InvariantCulture);
         var url = $"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={latStr},{lngStr}&radius={radiusMeters}&language=pt-BR&key={Uri.EscapeDataString(apiKey)}";
@@ -127,13 +252,16 @@ public class GooglePlacesClient : IGooglePlacesClient
     }
 
     /// <summary>
-    /// Busca progressiva híbrida de destinos de transporte do mesmo tipo (airport ou bus_station)
-    /// utilizando a Google Places API Nearby Search (New):
-    /// 1. Inicia com o raio padrão (1200m) e amplia progressivamente até o limite máximo de 50.000m (50 km).
-    /// 2. Filtra exclusivamente pelo tipo atual (airport ou bus_station).
-    /// 3. Ordena por distância (rankPreference = DISTANCE) e solicita até 20 resultados por consulta.
-    /// 4. Remove o próprio Place de origem e duplicados por ID.
-    /// 5. Encerra assim que atingir 10 destinos válidos ou chegar a 50 km, retornando até os 10 mais próximos.
+    /// Busca progressiva de destinos de transporte da MESMA subcategoria do Place de origem
+    /// (ex.: bus_station -> somente bus_station) via Google Places API Nearby Search (New):
+    /// 1. Raios progressivos 5 km -> 15 km -> 30 km -> 50 km.
+    /// 2. A primeira consulta usa rankPreference = DISTANCE (os mais próximos).
+    /// 3. A Places API (New) devolve no máximo 20 resultados por consulta. Quando uma consulta por
+    ///    DISTANCE vem cheia, ampliar o raio devolveria exatamente os mesmos 20 vizinhos; por isso as
+    ///    consultas seguintes passam a usar POPULARITY, que espalha os resultados pelo círculo inteiro.
+    /// 4. Os destinos são ACUMULADOS (sem descartar os próximos) até existir pelo menos um destino a
+    ///    mais de <see cref="FarTransportDestinationThresholdKm"/> km, ou até esgotar o raio de 50 km.
+    /// 5. Remove o próprio Place de origem e duplicados por ID.
     /// </summary>
     public async Task<TransportDestinationsLookupResult> SearchTransportDestinationsAsync(
         double latitude,
@@ -173,19 +301,28 @@ public class GooglePlacesClient : IGooglePlacesClient
         string? lastErrorCode = null;
         string? lastErrorMessage = null;
         bool anySuccessfulResponse = false;
+        // Uma vez que uma consulta por DISTANCE vem cheia, DISTANCE em raios maiores repete os mesmos resultados.
+        bool distanceRankingSaturated = false;
 
         foreach (var rawRadius in ProgressiveTransportRadiiMeters)
         {
             int radiusMeters = Math.Clamp(rawRadius, 100, MaxAllowedRadiusMeters);
             lastRadiusUsed = radiusMeters;
+            var rankPreference = distanceRankingSaturated ? "POPULARITY" : "DISTANCE";
 
             var stepResult = await QueryNearbyTransportPlacesNewAsync(
                 latitude,
                 longitude,
                 radiusMeters,
                 normalizedType,
+                rankPreference,
                 apiKey,
                 cancellationToken);
+
+            if (stepResult.Success && rankPreference == "DISTANCE" && stepResult.RawCount >= MaxPlacesNewQueryCount)
+            {
+                distanceRankingSaturated = true;
+            }
 
             if (!stepResult.Success)
             {
@@ -238,7 +375,7 @@ public class GooglePlacesClient : IGooglePlacesClient
                     );
                 }
 
-                if (collectedById.Count >= AdequateTransportDestinationsCount)
+                if (collectedById.Values.Any(d => d.DistanceKm > FarTransportDestinationThresholdKm))
                 {
                     break;
                 }
@@ -262,9 +399,9 @@ public class GooglePlacesClient : IGooglePlacesClient
             );
         }
 
+        // Sem corte por quantidade: cortar pelos N mais próximos descartaria justamente os destinos distantes.
         var ordered = collectedById.Values
             .OrderBy(d => d.DistanceKm)
-            .Take(MaxTransportDestinations)
             .ToList();
 
         return new TransportDestinationsLookupResult(
@@ -299,12 +436,13 @@ public class GooglePlacesClient : IGooglePlacesClient
         return R * c;
     }
 
-    private async Task<(bool Success, List<GamePoiDto> Candidates, string? ErrorCode, string? ErrorMessage)>
+    private async Task<(bool Success, List<GamePoiDto> Candidates, int RawCount, string? ErrorCode, string? ErrorMessage)>
         QueryNearbyTransportPlacesNewAsync(
             double latitude,
             double longitude,
             int radiusMeters,
             string transportType,
+            string rankPreference,
             string apiKey,
             CancellationToken cancellationToken)
     {
@@ -313,7 +451,7 @@ public class GooglePlacesClient : IGooglePlacesClient
         {
             includedTypes = new[] { transportType },
             maxResultCount = MaxPlacesNewQueryCount,
-            rankPreference = "DISTANCE",
+            rankPreference,
             languageCode = "pt-BR",
             locationRestriction = new
             {
@@ -344,7 +482,7 @@ public class GooglePlacesClient : IGooglePlacesClient
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                return (false, new List<GamePoiDto>(), $"HTTP_{(int)response.StatusCode}", "Places API (New) indisponível.");
+                return (false, new List<GamePoiDto>(), 0, $"HTTP_{(int)response.StatusCode}", "Places API (New) indisponível.");
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -352,8 +490,10 @@ public class GooglePlacesClient : IGooglePlacesClient
             var root = doc.RootElement;
 
             var list = new List<GamePoiDto>();
+            var rawCount = 0;
             if (root.TryGetProperty("places", out var placesEl) && placesEl.ValueKind == JsonValueKind.Array)
             {
+                rawCount = placesEl.GetArrayLength();
                 foreach (var item in placesEl.EnumerateArray())
                 {
                     var parsed = ParsePlaceNewItem(item, transportType);
@@ -364,16 +504,16 @@ public class GooglePlacesClient : IGooglePlacesClient
                 }
             }
 
-            return (true, list, null, null);
+            return (true, list, rawCount, null, null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogDebug(ex, "Places API (New) fallback acionado.");
-            return (false, new List<GamePoiDto>(), "PLACES_NEW_ERROR", ex.Message);
+            return (false, new List<GamePoiDto>(), 0, "PLACES_NEW_ERROR", ex.Message);
         }
     }
 
-    private async Task<(bool Success, List<GamePoiDto> Candidates, string? ErrorCode, string? ErrorMessage)>
+    private async Task<(bool Success, List<GamePoiDto> Candidates, int RawCount, string? ErrorCode, string? ErrorMessage)>
         QueryNearbyTransportPlacesLegacyAsync(
             double latitude,
             double longitude,
@@ -392,7 +532,7 @@ public class GooglePlacesClient : IGooglePlacesClient
             using var response = await _httpClient.GetAsync(url, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                return (false, new List<GamePoiDto>(), "UPSTREAM_HTTP_ERROR", "Falha ao consultar Google Places.");
+                return (false, new List<GamePoiDto>(), 0, "UPSTREAM_HTTP_ERROR", "Falha ao consultar Google Places.");
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -405,17 +545,19 @@ public class GooglePlacesClient : IGooglePlacesClient
 
             if (status == "ZERO_RESULTS")
             {
-                return (true, new List<GamePoiDto>(), null, null);
+                return (true, new List<GamePoiDto>(), 0, null, null);
             }
 
             if (status != "OK")
             {
-                return (false, new List<GamePoiDto>(), status, $"Google Places retornou status: {status}");
+                return (false, new List<GamePoiDto>(), 0, status, $"Google Places retornou status: {status}");
             }
 
             var list = new List<GamePoiDto>();
+            var rawCount = 0;
             if (root.TryGetProperty("results", out var resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
             {
+                rawCount = resultsProp.GetArrayLength();
                 foreach (var item in resultsProp.EnumerateArray())
                 {
                     var parsed = ParsePlaceItem(item);
@@ -426,15 +568,19 @@ public class GooglePlacesClient : IGooglePlacesClient
                 }
             }
 
-            return (true, list, null, null);
+            return (true, list, rawCount, null, null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            return (false, new List<GamePoiDto>(), "NETWORK_ERROR", ex.Message);
+            return (false, new List<GamePoiDto>(), 0, "NETWORK_ERROR", ex.Message);
         }
     }
 
-    private GamePoiDto? ParsePlaceNewItem(JsonElement item, string expectedTransportType)
+    /// <summary>
+    /// Converte um item da Places API (New). Quando <paramref name="expectedTransportType"/> é informado,
+    /// só aceita Places de Transportation daquela subcategoria exata.
+    /// </summary>
+    private GamePoiDto? ParsePlaceNewItem(JsonElement item, string? expectedTransportType)
     {
         if (!item.TryGetProperty("location", out var location) ||
             !location.TryGetProperty("latitude", out var latEl) ||
@@ -449,7 +595,7 @@ public class GooglePlacesClient : IGooglePlacesClient
             ? idEl.GetString()!
             : $"{lat.ToString(CultureInfo.InvariantCulture)},{lng.ToString(CultureInfo.InvariantCulture)}";
 
-        string name = "Terminal de Transporte";
+        string name = expectedTransportType is null ? "Local sem nome" : "Terminal de Transporte";
         if (item.TryGetProperty("displayName", out var displayNameEl))
         {
             if (displayNameEl.ValueKind == JsonValueKind.Object &&
@@ -483,9 +629,14 @@ public class GooglePlacesClient : IGooglePlacesClient
             : null;
 
         var classification = _categoryMapper.ClassifyPlace(primaryType, rawTypes);
-        if (classification is null ||
-            !string.Equals(classification.Category, PlaceCategoryMapper.CategoryTransportation, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(classification.Subcategory, expectedTransportType, StringComparison.OrdinalIgnoreCase))
+        if (classification is null)
+        {
+            return null;
+        }
+
+        if (expectedTransportType is not null &&
+            (!string.Equals(classification.Category, PlaceCategoryMapper.CategoryTransportation, StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(classification.Subcategory, expectedTransportType, StringComparison.OrdinalIgnoreCase)))
         {
             return null;
         }
@@ -608,12 +759,22 @@ public class GooglePlacesClient : IGooglePlacesClient
 
     private string? ResolveApiKey()
     {
-        var configured = _configuration["GoogleMaps:ApiKey"]
-            ?? Environment.GetEnvironmentVariable("GOOGLE_MAPS_API_KEY")
-            ?? Environment.GetEnvironmentVariable("VITE_GOOGLE_MAPS_API_KEY")
-            ?? TryReadKeyFromFrontendDotEnv("VITE_GOOGLE_MAPS_API_KEY");
+        // appsettings.json ships with "ApiKey": "" — empty strings must not stop the fallback chain.
+        var candidates = new Func<string?>[]
+        {
+            () => _configuration["GoogleMaps:ApiKey"],
+            () => Environment.GetEnvironmentVariable("GOOGLE_MAPS_API_KEY"),
+            () => Environment.GetEnvironmentVariable("VITE_GOOGLE_MAPS_API_KEY"),
+            () => TryReadKeyFromFrontendDotEnv("VITE_GOOGLE_MAPS_API_KEY"),
+        };
 
-        return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+        foreach (var candidate in candidates)
+        {
+            var value = candidate();
+            if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+        }
+
+        return null;
     }
 
     private static string? TryReadKeyFromFrontendDotEnv(string variableName)

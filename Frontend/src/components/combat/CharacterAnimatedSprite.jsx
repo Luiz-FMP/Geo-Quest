@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * Definições de frames calibradas a partir dos sprite sheets transparentes (500x500).
