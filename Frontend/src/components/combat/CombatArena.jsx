@@ -1,4 +1,5 @@
 import React from "react";
+import CharacterAnimatedSprite from "./CharacterAnimatedSprite";
 
 const CORES_PERSONAGEM = {
   Miguel: { cor: "#38BDF8", bg: "#112233", codigo: "EXP-01" },
@@ -103,39 +104,24 @@ export default function CombatArena({
           </div>
         )}
 
-        {/* Token / Sprite do Personagem */}
+        {/* Sprite Animado do Personagem com Sistema de Idle, Ping-Pong e DeltaTime */}
         <div
           style={{
-            width: 115,
-            height: 115,
-            borderRadius: 12,
-            background: danoRecebidoAnim ? "#451A1C" : temaChar.bg,
-            border: `2px solid ${danoRecebidoAnim ? "#F87171" : temaChar.cor}`,
-            boxShadow: `0 0 28px ${
-              danoRecebidoAnim ? "rgba(248, 113, 113, 0.45)" : `${temaChar.cor}44`
-            }`,
             display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
             justifyContent: "center",
-            margin: "0 auto 10px auto",
+            alignItems: "center",
+            margin: "0 auto -6px auto",
             position: "relative",
           }}
         >
-          <span
-            style={{
-              fontSize: 15,
-              fontWeight: 700,
-              color: danoRecebidoAnim ? "#F87171" : temaChar.cor,
-            }}
-          >
-            {temaChar.codigo}
-          </span>
-          <span style={{ fontSize: 10, color: "#9CAEA0", marginTop: 4 }}>
-            VEL {personagem.velocidade || 10}
-          </span>
+          <CharacterAnimatedSprite
+            characterName={personagem.nome}
+            action="idle"
+            scale={1.65}
+            isDamaged={Boolean(danoRecebidoAnim)}
+            useProcedural={true}
+          />
         </div>
-
         {/* Sombra no chão */}
         <div
           style={{
