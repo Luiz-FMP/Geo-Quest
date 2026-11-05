@@ -12,12 +12,14 @@ import {
   equiparItemJogador,
   fetchJogadorAtual,
   gerarItemDebugInventario,
+  getDebugCoordinatesConfig,
   moverItemInventario,
   registrarPercursoJogador,
   registrarVisitaPlaceJogador,
   removerItemInventario,
   retornarParaCheckpointJogador,
   treinarSportsJogador,
+  validateDebugCoordinates,
   vasculharNaturalFeatureJogador,
   viajarTransporteJogador,
 } from "../services/playerApi";
@@ -83,11 +85,59 @@ export default function GeoQuestHome() {
     [],
   );
 
-  const handleDefineHome = useCallback(async (lat, lng) => {
-    const updated = await definirHomeJogador(lat, lng, false);
+  const handleDefineHome = useCallback(async (lat, lng, forcarAtualizacao = true) => {
+    const updated = await definirHomeJogador(lat, lng, forcarAtualizacao);
     setPlayerState(updated);
     return updated;
   }, []);
+
+  const handleApplyDebugCoords = useCallback(
+    async (savedConfig) => {
+      if (savedConfig?.enabled) {
+        const validation = validateDebugCoordinates(
+          savedConfig.latitude,
+          savedConfig.longitude,
+        );
+        if (validation.valid) {
+          setLocationError(null);
+          setCoords({
+            lat: validation.latitude,
+            lng: validation.longitude,
+          });
+          await handleDefineHome(validation.latitude, validation.longitude, true);
+        }
+        return;
+      }
+
+      // Quando desativado durante uma sessão ativa, volta a obter a localização real do dispositivo
+      if (coords && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const latitude = position?.coords?.latitude;
+            const longitude = position?.coords?.longitude;
+            if (
+              typeof latitude === "number" &&
+              typeof longitude === "number" &&
+              !Number.isNaN(latitude) &&
+              !Number.isNaN(longitude)
+            ) {
+              setCoords({ lat: latitude, lng: longitude });
+              try {
+                await handleDefineHome(latitude, longitude, true);
+              } catch {
+                // Ignora falha de sincronização com servidor
+              }
+            }
+          },
+          () => {
+            // Se falhar em segundo plano ao desativar debug, preserva mensagem de erro na próxima tentativa de sessão
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+        );
+      }
+    },
+    [coords, handleDefineHome],
+  );
 
   const handleVisitPlace = useCallback(async (place) => {
     if (!place || !place.id || place.id === "home") return null;
@@ -172,17 +222,17 @@ export default function GeoQuestHome() {
   const handleTravelTransport = useCallback(
     async (originPlace, destinationPlace) => {
       const subcategoria =
-        destinationPlace.subcategory || originPlace.subcategory || "bus_station";
+        destinationPlace.subcategory || originPlace.subcategory || "";
       const response = await viajarTransporteJogador({
         origemPlaceId: originPlace.id,
         origemNome: originPlace.name,
-        origemSubcategoria: originPlace.subcategory,
+        origemSubcategoria: originPlace.subcategory || subcategoria,
         origemLatitude: originPlace.lat,
         origemLongitude: originPlace.lng,
         destinoPlaceId: destinationPlace.id,
         destinoNome: destinationPlace.name,
         subcategoria,
-        destinoSubcategoria: subcategoria,
+        destinoSubcategoria: destinationPlace.subcategory || subcategoria,
         destinoLatitude: destinationPlace.lat,
         destinoLongitude: destinationPlace.lng,
         distanciaKm: destinationPlace.distanceKm,
@@ -274,14 +324,46 @@ export default function GeoQuestHome() {
     [],
   );
 
-  function handleStartGame() {
+  async function handleStartGame() {
+    setLocationError(null);
+
+    // Prioridade 1: Se o modo de coordenadas de debug estiver habilitado, utilizar as coordenadas configuradas.
+    const debugConfig = getDebugCoordinatesConfig();
+    if (debugConfig?.enabled) {
+      const validation = validateDebugCoordinates(
+        debugConfig.latitude,
+        debugConfig.longitude,
+      );
+      if (!validation.valid) {
+        setLocationError(
+          `Coordenadas de debug inválidas: ${validation.error} Corrija ou desative nas Configurações.`,
+        );
+        return;
+      }
+
+      setIsLoadingLocation(true);
+      try {
+        await handleDefineHome(validation.latitude, validation.longitude, true);
+      } catch {
+        // Segue com estado local atualizado se o backend estiver offline
+      }
+
+      setCoords({
+        lat: validation.latitude,
+        lng: validation.longitude,
+      });
+      setIsLoadingLocation(false);
+      setScreen("character-select");
+      return;
+    }
+
+    // Prioridade 2: Caso contrário, utilizar a localização real do usuário via Geolocation API.
     if (!navigator.geolocation) {
       setLocationError("Seu navegador não suporta geolocalização.");
       return;
     }
 
     setIsLoadingLocation(true);
-    setLocationError(null);
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -292,17 +374,21 @@ export default function GeoQuestHome() {
           typeof latitude !== "number" ||
           typeof longitude !== "number" ||
           Number.isNaN(latitude) ||
-          Number.isNaN(longitude)
+          Number.isNaN(longitude) ||
+          latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180
         ) {
           setLocationError(
-            "Dados de localização incompletos retornados pelo navegador.",
+            "Dados de localização incompletos ou inválidos retornados pelo navegador.",
           );
           setIsLoadingLocation(false);
           return;
         }
 
         try {
-          await handleDefineHome(latitude, longitude);
+          await handleDefineHome(latitude, longitude, true);
         } catch {
           // Segue com coordenadas locais se necessário
         }
@@ -380,6 +466,7 @@ export default function GeoQuestHome() {
             onEquipItem={handleEquipItem}
             onUnequipItem={handleUnequipItem}
             onSpawnDebugItem={handleSpawnDebugItem}
+            onApplyDebugCoords={handleApplyDebugCoords}
           />
         )}
       </>
@@ -749,6 +836,7 @@ export default function GeoQuestHome() {
         onEquipItem={handleEquipItem}
         onUnequipItem={handleUnequipItem}
         onSpawnDebugItem={handleSpawnDebugItem}
+        onApplyDebugCoords={handleApplyDebugCoords}
       />
     </div>
   );

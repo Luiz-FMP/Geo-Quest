@@ -1,5 +1,3 @@
-import React from "react";
-
 const CORES_PERSONAGEM = {
   Miguel: { cor: "#38BDF8", bg: "#112233", codigo: "EXP-01" },
   Amélia: { cor: "#34D399", bg: "#112A22", codigo: "CRT-02" },

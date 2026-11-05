@@ -1,8 +1,5 @@
-import React from "react";
-
 export default function CombatHUD({
   personagem,
-  hpJogador,
   energiaJogador,
   alvoAtual,
   turnoBloqueado,

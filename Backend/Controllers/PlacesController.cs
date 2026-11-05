@@ -95,12 +95,12 @@ public class PlacesController : ControllerBase
         }
 
         var normalizedType = (type ?? string.Empty).Trim().ToLowerInvariant();
-        if (normalizedType is not ("airport" or "bus_station"))
+        if (!GeoQuest.Api.Services.PlaceCategoryMapper.IsAllowedTransportationSubcategory(normalizedType))
         {
             return BadRequest(new
             {
                 error = "INVALID_TRANSPORT_TYPE",
-                message = "O tipo de transporte deve ser 'airport' ou 'bus_station'."
+                message = $"Subcategoria de transporte inválida ('{normalizedType}')."
             });
         }
 

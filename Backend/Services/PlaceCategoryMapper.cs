@@ -49,6 +49,49 @@ public class PlaceCategoryMapper
     ];
 
     /// <summary>
+    /// Lista determinística e ordenada das 24 subcategorias oficiais de Transportation (Google Places API).
+    /// Utilizada para validação estrita e desempate controlado quando primaryType não está presente.
+    /// </summary>
+    public static readonly string[] OrderedTransportationSubcategories =
+    [
+        "international_airport",
+        "airport",
+        "airstrip",
+        "heliport",
+        "ferry_terminal",
+        "ferry_service",
+        "train_station",
+        "subway_station",
+        "light_rail_station",
+        "tram_stop",
+        "bus_station",
+        "bus_stop",
+        "transit_depot",
+        "transit_station",
+        "transit_stop",
+        "park_and_ride",
+        "taxi_stand",
+        "taxi_service",
+        "train_ticket_office",
+        "bike_sharing_station",
+        "truck_stop",
+        "toll_station",
+        "bridge",
+        "transportation_service"
+    ];
+
+    public static readonly HashSet<string> AllowedTransportationSubcategories = new(
+        OrderedTransportationSubcategories,
+        StringComparer.OrdinalIgnoreCase
+    );
+
+    public static bool IsAllowedTransportationSubcategory(string? subcategory)
+    {
+        return !string.IsNullOrWhiteSpace(subcategory) &&
+               AllowedTransportationSubcategories.Contains(subcategory.Trim());
+    }
+
+    /// <summary>
     /// Ordem de prioridade centralizada e documentada para desempate quando o primaryType
     /// não está disponível ou não pertence às 10 categorias permitidas.
     /// </summary>
@@ -150,13 +193,7 @@ public class PlaceCategoryMapper
         ),
         (
             CategoryTransportation,
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "airport", "airstrip", "bus_station", "bus_stop", "ferry_terminal",
-                "heliport", "international_airport", "light_rail_station", "park_and_ride",
-                "subway_station", "taxi_stand", "train_station", "transit_depot",
-                "transit_station", "truck_stop"
-            }
+            new HashSet<string>(OrderedTransportationSubcategories, StringComparer.OrdinalIgnoreCase)
         ),
         (
             CategoryServices,
@@ -220,10 +257,20 @@ public class PlaceCategoryMapper
         // 4. Caso não exista primaryType válido, buscar nos tipos da lista seguindo a prioridade centralizada.
         foreach (var (category, subcategories) in OrderedCategoryRules)
         {
-            var matchedSubcategory = normalizedTypes.FirstOrDefault(
-                t => !string.Equals(t, "store", StringComparison.OrdinalIgnoreCase) &&
-                     !string.Equals(t, "natural_feature", StringComparison.OrdinalIgnoreCase) &&
-                     subcategories.Contains(t));
+            string? matchedSubcategory;
+            if (string.Equals(category, CategoryTransportation, StringComparison.OrdinalIgnoreCase))
+            {
+                // Desempate controlado e determinístico para Transportation (nunca aleatório e ignorando tipos genéricos)
+                matchedSubcategory = OrderedTransportationSubcategories.FirstOrDefault(
+                    sub => normalizedTypes.Contains(sub, StringComparer.OrdinalIgnoreCase));
+            }
+            else
+            {
+                matchedSubcategory = normalizedTypes.FirstOrDefault(
+                    t => !string.Equals(t, "store", StringComparison.OrdinalIgnoreCase) &&
+                         !string.Equals(t, "natural_feature", StringComparison.OrdinalIgnoreCase) &&
+                         subcategories.Contains(t));
+            }
 
             if (matchedSubcategory is not null)
             {
@@ -262,18 +309,15 @@ public class PlaceCategoryMapper
 
         if (string.Equals(category, CategoryTransportation, StringComparison.OrdinalIgnoreCase))
         {
-            if (string.Equals(candidateSubcategory, "airport", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(candidateSubcategory, "international_airport", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(candidateSubcategory, "airstrip", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(candidateSubcategory, "heliport", StringComparison.OrdinalIgnoreCase) ||
-                normalizedTypes.Contains("airport", StringComparer.OrdinalIgnoreCase) ||
-                normalizedTypes.Contains("international_airport", StringComparer.OrdinalIgnoreCase) ||
-                normalizedTypes.Contains("airstrip", StringComparer.OrdinalIgnoreCase))
+            if (AllowedTransportationSubcategories.Contains(candidateSubcategory))
             {
-                return "airport";
+                return candidateSubcategory.ToLowerInvariant();
             }
 
-            return "bus_station";
+            var matched = OrderedTransportationSubcategories.FirstOrDefault(
+                sub => normalizedTypes.Contains(sub, StringComparer.OrdinalIgnoreCase));
+
+            return matched ?? "bus_station";
         }
 
         return candidateSubcategory;

@@ -16,6 +16,7 @@ export default function PlayerSystemsOverlay({
   onEquipItem,
   onUnequipItem,
   onSpawnDebugItem,
+  onApplyDebugCoords,
 }) {
   const [isSubmenuOpen, setIsSubmenuOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState(null); // "status" | "inventory" | "statistics" | "settings" | null
@@ -72,6 +73,7 @@ export default function PlayerSystemsOverlay({
         <PlayerSettingsModal
           playerState={playerState}
           onUpdatePlayerHp={onUpdatePlayerHp}
+          onApplyDebugCoords={onApplyDebugCoords}
           onClose={handleCloseMenu}
         />
       )}
