@@ -108,9 +108,14 @@ export async function precomputePlayerMarkerFrames(characterName) {
     // 2. Corrida (Direita e Esquerda)
     const runAnim = config.animations?.run;
     if (runAnim && runAnim.frames?.length > 0 && sheetImg) {
+      const invertRun = Boolean(runAnim.flipX);
       for (const frame of runAnim.frames) {
-        result.runRight.push(renderFrameToDataUrl(sheetImg, frame, false));
-        result.runLeft.push(renderFrameToDataUrl(sheetImg, frame, true));
+        result.runRight.push(
+          renderFrameToDataUrl(sheetImg, frame, invertRun ? true : false)
+        );
+        result.runLeft.push(
+          renderFrameToDataUrl(sheetImg, frame, invertRun ? false : true)
+        );
       }
     }
 

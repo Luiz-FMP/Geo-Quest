@@ -156,7 +156,8 @@ export default function CharacterAnimatedSprite({
 
         ctx.save();
 
-        if (flipX) {
+        const shouldFlip = Boolean(animation?.flipX ? !flipX : flipX);
+        if (shouldFlip) {
           ctx.translate(canvas.width, 0);
           ctx.scale(-1, 1);
         }

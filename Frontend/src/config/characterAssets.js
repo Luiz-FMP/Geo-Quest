@@ -50,18 +50,20 @@ export const CHARACTERS_CONFIG = {
           { x: 504, y: 367, w: 201, h: 276, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Batalha parada: sprite de lado, virada para a direita
+      // Batalha parada: sprite de lado, virada para a direita (invertida para olhar em direção aos inimigos)
       battleIdle: {
         frameDuration: 0.3,
         loop: true,
+        flipX: true,
         frames: [
           { x: 736, y: 367, w: 200, h: 278, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Corrida no mapa (4 frames)
+      // Corrida no mapa (4 frames) - orientação invertida para caminhar voltada para o sentido do movimento
       run: {
         frameDuration: 0.13,
         loop: true,
+        flipX: true,
         frames: [
           { x: 5, y: 723, w: 157, h: 206, anchorX: 0.5, anchorY: 1.0 },
           { x: 160, y: 725, w: 130, h: 204, anchorX: 0.5, anchorY: 1.0 },
