@@ -297,3 +297,63 @@ public record TreinarSportsResponse(
     int IncrementoAplicado,
     JogadorEstadoDto Jogador
 );
+
+public record SortearAtributoServicesRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0
+);
+
+public record SortearAtributoServicesResponse(
+    string PlaceId,
+    string Atributo,
+    string RotuloAtributo,
+    int BonusValor,
+    int DuracaoSegundos,
+    int CustoMoedas,
+    JogadorEstadoDto Jogador
+);
+
+public record ComprarBuffServicesRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0
+);
+
+public record ComprarBuffServicesResponse(
+    string PlaceId,
+    string Atributo,
+    string RotuloAtributo,
+    int BonusValor,
+    int DuracaoSegundos,
+    int CustoMoedas,
+    string Mensagem,
+    BuffJogadorDto BuffAplicado,
+    JogadorEstadoDto Jogador
+);
+
+public record ReceberBuffCultureRequest(
+    string PlaceId,
+    string Nome,
+    string? Subcategoria = null,
+    double Latitude = 0,
+    double Longitude = 0,
+    string? InteracaoId = null
+);
+
+public record ReceberBuffCultureResponse(
+    string PlaceId,
+    bool RecebeuBuff,
+    string TipoResultado,
+    string NomeBuff,
+    string DescricaoBuff,
+    int BonusValor,
+    int DuracaoSegundos,
+    string Mensagem,
+    BuffJogadorDto? BuffAplicado,
+    JogadorEstadoDto Jogador
+);

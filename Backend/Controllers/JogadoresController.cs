@@ -15,6 +15,9 @@ public class JogadoresController : ControllerBase
 {
     public const int CustoMoedasCuraPaga = 50;
     public const int CustoMoedasDescansoLodging = 25;
+    public const int CustoMoedasBuffServices = 50;
+    public const int DuracaoSegundosBuffServices = 600;
+    public const int DuracaoSegundosBuffCulture = 300;
     public const int RecompensaMoedasExploracaoNatural = 10;
     public const int LimiteHistoricoPorCategoria = 10;
 
@@ -1051,6 +1054,320 @@ public class JogadoresController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Seção 4: Services — Ao selecionar um Place de Services, sorteia (caso ainda não tenha sido sorteado)
+    /// e salva qual atributo será aprimorado naquele local específico.
+    /// </summary>
+    [HttpPost("atual/services/sortear-atributo")]
+    public async Task<ActionResult<SortearAtributoServicesResponse>> SortearOuObterAtributoServices(
+        [FromBody] SortearAtributoServicesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.PlaceId))
+        {
+            return BadRequest(new { mensagem = "Identificador do estabelecimento de serviços inválido." });
+        }
+
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+            string placeId = request.PlaceId.Trim();
+            string nome = string.IsNullOrWhiteSpace(request.Nome) ? "Serviço Urbano" : request.Nome.Trim();
+            string subcategoria = string.IsNullOrWhiteSpace(request.Subcategoria)
+                ? "service"
+                : request.Subcategoria.Trim().ToLowerInvariant();
+
+            var estadoPlace = await ObterOuCriarEstadoPermanenteAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategoryServices,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                cancellationToken);
+
+            string atributo = GarantirAtributoSorteadoServicesPlace(estadoPlace);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            var spec = PlayerStatsCalculator.ObterEspecificacaoBuff(atributo, "services");
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+
+            return Ok(new SortearAtributoServicesResponse(
+                PlaceId: placeId,
+                Atributo: spec.Atributo,
+                RotuloAtributo: spec.RotuloAtributo,
+                BonusValor: spec.BonusValor,
+                DuracaoSegundos: spec.DuracaoSegundos,
+                CustoMoedas: CustoMoedasBuffServices,
+                Jogador: estado
+            ));
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Seção 4: Services — Compra de aprimoramento temporário (10 min) por 50 moedas (50g).
+    /// Permite comprar novamente no mesmo local quantas vezes o jogador desejar, desde que possua moedas suficientes.
+    /// </summary>
+    [HttpPost("atual/services/comprar-buff")]
+    public async Task<ActionResult<ComprarBuffServicesResponse>> ComprarBuffEmServices(
+        [FromBody] ComprarBuffServicesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.PlaceId))
+        {
+            return BadRequest(new { mensagem = "Identificador do estabelecimento de serviços inválido." });
+        }
+
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+            string placeId = request.PlaceId.Trim();
+            string nome = string.IsNullOrWhiteSpace(request.Nome) ? "Serviço Urbano" : request.Nome.Trim();
+            string subcategoria = string.IsNullOrWhiteSpace(request.Subcategoria)
+                ? "service"
+                : request.Subcategoria.Trim().ToLowerInvariant();
+
+            var estadoPlace = await ObterOuCriarEstadoPermanenteAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategoryServices,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                cancellationToken);
+
+            string atributo = GarantirAtributoSorteadoServicesPlace(estadoPlace);
+            var spec = PlayerStatsCalculator.ObterEspecificacaoBuff(atributo, "services");
+
+            if (jogador.Moedas < CustoMoedasBuffServices)
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return BadRequest(new
+                {
+                    mensagem = $"Você não possui moedas o suficiente para adquirir o aprimoramento. São necessárias {CustoMoedasBuffServices} moedas (Saldo atual: {jogador.Moedas}g)."
+                });
+            }
+
+            jogador.Moedas = Math.Max(0, jogador.Moedas - CustoMoedasBuffServices);
+
+            var buffCriado = AplicarOuSobrescreverBuffInterno(jogador, spec.Atributo, "services");
+
+            if (request.Latitude != 0 || request.Longitude != 0)
+            {
+                jogador.PosicaoAtualLatitude = Math.Round(request.Latitude, 6);
+                jogador.PosicaoAtualLongitude = Math.Round(request.Longitude, 6);
+            }
+
+            await RegistrarVisitaECheckpointInternoAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategoryServices,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                estadoInteracao: $"Buff comprado: {spec.NomeBuff} (-{CustoMoedasBuffServices}g)",
+                marcarConcluido: false,
+                marcarCuraGratuita: false,
+                cancellationToken);
+
+            if (jogador.Estatisticas is not null)
+            {
+                jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+            var buffDto = PlayerStatsCalculator.MapearBuffJogador(buffCriado);
+
+            string mensagem = $"Aprimoramento comprado com sucesso! +{spec.BonusValor} de {spec.RotuloAtributo} ativado por 10 minutos (-{CustoMoedasBuffServices}g).";
+
+            return Ok(new ComprarBuffServicesResponse(
+                PlaceId: placeId,
+                Atributo: spec.Atributo,
+                RotuloAtributo: spec.RotuloAtributo,
+                BonusValor: spec.BonusValor,
+                DuracaoSegundos: spec.DuracaoSegundos,
+                CustoMoedas: CustoMoedasBuffServices,
+                Mensagem: mensagem,
+                BuffAplicado: buffDto,
+                Jogador: estado
+            ));
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Seção 5: Culture — Recebe um aprimoramento temporário gratuito (5 min) sorteado na hora do clique.
+    /// Restrito a uma única vez por Place de Culture.
+    /// </summary>
+    [HttpPost("atual/culture/receber-aprimoramento")]
+    public async Task<ActionResult<ReceberBuffCultureResponse>> ReceberAprimoramentoEmCulture(
+        [FromBody] ReceberBuffCultureRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.PlaceId))
+        {
+            return BadRequest(new { mensagem = "Identificador do espaço cultural inválido." });
+        }
+
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+            string placeId = request.PlaceId.Trim();
+            string nome = string.IsNullOrWhiteSpace(request.Nome) ? "Espaço Cultural" : request.Nome.Trim();
+            string subcategoria = string.IsNullOrWhiteSpace(request.Subcategoria)
+                ? "cultural_landmark"
+                : request.Subcategoria.Trim().ToLowerInvariant();
+
+            var estadoPlace = await ObterOuCriarEstadoPermanenteAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategoryCulture,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                cancellationToken);
+
+            if (estadoPlace.Concluido)
+            {
+                return BadRequest(new
+                {
+                    mensagem = "Você já recebeu o aprimoramento deste local cultural. Não é possível receber novamente no mesmo Place."
+                });
+            }
+
+            string resultadoSorteio = PlayerStatsCalculator.SortearResultadoCulture(Random.Shared.NextDouble());
+            bool recebeuBuff = !string.Equals(resultadoSorteio, "nada", StringComparison.OrdinalIgnoreCase);
+
+            BuffJogador? buffCriado = null;
+            string nomeBuff;
+            string descricaoBuff;
+            int bonusValor = 0;
+            int duracaoSegundos = 0;
+            string mensagem;
+            string placeholderKey = "buff_nada";
+
+            if (recebeuBuff)
+            {
+                var spec = PlayerStatsCalculator.ObterEspecificacaoBuff(resultadoSorteio, "culture");
+                buffCriado = AplicarOuSobrescreverBuffInterno(jogador, spec.Atributo, "culture");
+                nomeBuff = spec.NomeBuff;
+                descricaoBuff = spec.DescricaoBuff;
+                bonusValor = spec.BonusValor;
+                duracaoSegundos = spec.DuracaoSegundos;
+                placeholderKey = spec.PlaceholderKey;
+                mensagem = $"Inspiração cultural recebida: {spec.NomeBuff} (+{spec.BonusValor} de {spec.RotuloAtributo} por 5 minutos)!";
+            }
+            else
+            {
+                nomeBuff = "Nada";
+                descricaoBuff = "Nenhum aprimoramento recebido desta vez.";
+                mensagem = "Você contemplou o espaço cultural, mas não recebeu nenhum aprimoramento temporário desta vez.";
+            }
+
+            estadoPlace.Concluido = true;
+            estadoPlace.EstoqueJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                tipo = "culture_buff",
+                resultado = resultadoSorteio,
+                recebeuBuff,
+                nome = nomeBuff,
+                descricao = descricaoBuff,
+                bonusValor,
+                duracaoSegundos,
+                placeholderKey
+            });
+            estadoPlace.UltimaAtualizacaoUtc = DateTime.UtcNow;
+
+            if (request.Latitude != 0 || request.Longitude != 0)
+            {
+                jogador.PosicaoAtualLatitude = Math.Round(request.Latitude, 6);
+                jogador.PosicaoAtualLongitude = Math.Round(request.Longitude, 6);
+            }
+
+            await RegistrarVisitaECheckpointInternoAsync(
+                jogador,
+                placeId,
+                nome,
+                PlaceCategoryMapper.CategoryCulture,
+                subcategoria,
+                request.Latitude,
+                request.Longitude,
+                estadoInteracao: recebeuBuff ? $"Concluído ({nomeBuff})" : "Concluído (Nenhum aprimoramento)",
+                marcarConcluido: true,
+                marcarCuraGratuita: false,
+                cancellationToken);
+
+            if (jogador.Estatisticas is not null)
+            {
+                jogador.Estatisticas.UltimaAtualizacaoUtc = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+            var buffDto = buffCriado is not null ? PlayerStatsCalculator.MapearBuffJogador(buffCriado) : null;
+
+            return Ok(new ReceberBuffCultureResponse(
+                PlaceId: placeId,
+                RecebeuBuff: recebeuBuff,
+                TipoResultado: resultadoSorteio,
+                NomeBuff: nomeBuff,
+                DescricaoBuff: descricaoBuff,
+                BonusValor: bonusValor,
+                DuracaoSegundos: duracaoSegundos,
+                Mensagem: mensagem,
+                BuffAplicado: buffDto,
+                Jogador: estado
+            ));
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Seção 3: Sincroniza e remove buffs temporários cujo tempo já expirou.
+    /// </summary>
+    [HttpPost("atual/buffs/sincronizar")]
+    public async Task<ActionResult<JogadorEstadoDto>> SincronizarBuffsAtivos(CancellationToken cancellationToken)
+    {
+        await ActionConcurrencyLock.WaitAsync(cancellationToken);
+        try
+        {
+            var jogador = await ObterOuCriarJogadorLocalAsync(cancellationToken);
+            var estado = await ConstruirEstadoDtoAsync(jogador, cancellationToken);
+            return Ok(estado);
+        }
+        finally
+        {
+            ActionConcurrencyLock.Release();
+        }
+    }
+
     [HttpGet("atual/atributos")]
     public async Task<ActionResult<AtributosDetalhadosDto>> GetAtributos(CancellationToken cancellationToken)
     {
@@ -1507,6 +1824,10 @@ public class JogadoresController : ControllerBase
                 existente.Latitude = latitude;
                 existente.Longitude = longitude;
             }
+            if (string.Equals(categoria, PlaceCategoryMapper.CategoryServices, StringComparison.OrdinalIgnoreCase))
+            {
+                GarantirAtributoSorteadoServicesPlace(existente);
+            }
             return existente;
         }
 
@@ -1522,7 +1843,17 @@ public class JogadoresController : ControllerBase
         }
         else if (string.Equals(categoria, PlaceCategoryMapper.CategoryServices, StringComparison.OrdinalIgnoreCase))
         {
-            estoqueInicialJson = "{\"tipo\":\"buffs\",\"custoMoedas\":50,\"wip\":true}";
+            string atributoSorteado = PlayerStatsCalculator.SortearAtributoServices(Random.Shared.NextDouble());
+            var spec = PlayerStatsCalculator.ObterEspecificacaoBuff(atributoSorteado, "services");
+            estoqueInicialJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                tipo = "services_buff",
+                atributo = spec.Atributo,
+                rotuloAtributo = spec.RotuloAtributo,
+                bonusValor = spec.BonusValor,
+                duracaoSegundos = spec.DuracaoSegundos,
+                custoMoedas = CustoMoedasBuffServices
+            });
         }
 
         var novoEstado = new EstadoPermanentePlace
@@ -1688,12 +2019,13 @@ public class JogadoresController : ControllerBase
 
         if (jogador is not null)
         {
+            await LimparBuffsExpiradosInternoAsync(jogador, cancellationToken);
             return jogador;
         }
 
         await DatabaseInitializer.InitializeAsync(HttpContext.RequestServices);
 
-        return await _context.Jogadores
+        var recemCriado = await _context.Jogadores
             .Include(j => j.Personagem)
             .Include(j => j.Estatisticas)
             .Include(j => j.ItensInventario)
@@ -1703,6 +2035,139 @@ public class JogadoresController : ControllerBase
             .Include(j => j.HistoricoVisitas)
             .OrderBy(j => j.Id)
             .FirstAsync(cancellationToken);
+
+        await LimparBuffsExpiradosInternoAsync(recemCriado, cancellationToken);
+        return recemCriado;
+    }
+
+    private async Task LimparBuffsExpiradosInternoAsync(Jogador jogador, CancellationToken cancellationToken)
+    {
+        var agora = DateTime.UtcNow;
+        var expirados = jogador.Buffs
+            .Where(b => !b.Ativo || (b.ExpiraEmUtc.HasValue && b.ExpiraEmUtc.Value <= agora))
+            .ToList();
+
+        if (expirados.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var exp in expirados)
+        {
+            _context.BuffsJogador.Remove(exp);
+            jogador.Buffs.Remove(exp);
+        }
+
+        var atributosAposExpiracao = _statsCalculator.CalcularAtributos(jogador);
+        jogador.VidaAtual = Math.Clamp(jogador.VidaAtual, 0, atributosAposExpiracao.VidaFinal);
+        jogador.EnergiaAtual = Math.Clamp(Math.Round(jogador.EnergiaAtual, 2), 0.0, atributosAposExpiracao.EnergiaMaximaFinal);
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private string GarantirAtributoSorteadoServicesPlace(EstadoPermanentePlace estadoPlace)
+    {
+        if (!string.IsNullOrWhiteSpace(estadoPlace.EstoqueJson))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(estadoPlace.EstoqueJson);
+                if (doc.RootElement.TryGetProperty("atributo", out var attrEl) &&
+                    attrEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    string? savedAttr = attrEl.GetString();
+                    if (PlayerStatsCalculator.EhAtributoBuffValido(savedAttr))
+                    {
+                        return savedAttr!.Trim().ToLowerInvariant();
+                    }
+                }
+            }
+            catch
+            {
+                // Re-sorteia caso o JSON antigo não possua o atributo
+            }
+        }
+
+        string atributoSorteado = PlayerStatsCalculator.SortearAtributoServices(Random.Shared.NextDouble());
+        var spec = PlayerStatsCalculator.ObterEspecificacaoBuff(atributoSorteado, "services");
+        estadoPlace.EstoqueJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            tipo = "services_buff",
+            atributo = spec.Atributo,
+            rotuloAtributo = spec.RotuloAtributo,
+            bonusValor = spec.BonusValor,
+            duracaoSegundos = spec.DuracaoSegundos,
+            custoMoedas = CustoMoedasBuffServices
+        });
+        estadoPlace.UltimaAtualizacaoUtc = DateTime.UtcNow;
+        return spec.Atributo;
+    }
+
+    private BuffJogador AplicarOuSobrescreverBuffInterno(Jogador jogador, string atributo, string origem)
+    {
+        var agora = DateTime.UtcNow;
+        var spec = PlayerStatsCalculator.ObterEspecificacaoBuff(atributo, origem);
+
+        // Regra Seção 3: Caso um aprimoramento que mude o mesmo atributo já ativo seja adquirido,
+        // ele sobrescreve o aprimoramento anterior desse mesmo atributo (não se acumulam).
+        var existentesMesmoAtributoOuExpirados = jogador.Buffs
+            .Where(b =>
+                !b.Ativo ||
+                (b.ExpiraEmUtc.HasValue && b.ExpiraEmUtc.Value <= agora) ||
+                string.Equals(PlayerStatsCalculator.IdentificarAtributoBuff(b), spec.Atributo, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        int bonusVidaAnterior = existentesMesmoAtributoOuExpirados
+            .Where(b => b.Ativo && (!b.ExpiraEmUtc.HasValue || b.ExpiraEmUtc.Value > agora))
+            .Sum(b => b.BonusVida);
+        double bonusEnergiaAnterior = existentesMesmoAtributoOuExpirados
+            .Where(b => b.Ativo && (!b.ExpiraEmUtc.HasValue || b.ExpiraEmUtc.Value > agora))
+            .Sum(b => b.BonusEnergia);
+
+        foreach (var antigo in existentesMesmoAtributoOuExpirados)
+        {
+            _context.BuffsJogador.Remove(antigo);
+            jogador.Buffs.Remove(antigo);
+        }
+
+        var novoBuff = new BuffJogador
+        {
+            JogadorId = jogador.Id,
+            Codigo = $"{origem}_{spec.Atributo}",
+            Nome = spec.NomeBuff,
+            Descricao = spec.DescricaoBuff,
+            BonusVida = spec.Atributo == "vida" ? spec.BonusValor : 0,
+            BonusEnergia = spec.Atributo == "energia" ? spec.BonusValor : 0,
+            BonusDano = spec.Atributo == "dano" ? spec.BonusValor : 0,
+            BonusDefesa = spec.Atributo == "defesa" ? spec.BonusValor : 0,
+            BonusVelocidade = spec.Atributo == "velocidade" ? spec.BonusValor : 0,
+            DuracaoSegundos = spec.DuracaoSegundos,
+            CondicaoDuracao = $"{spec.DuracaoSegundos / 60} min",
+            CriadoEmUtc = agora,
+            ExpiraEmUtc = agora.AddSeconds(spec.DuracaoSegundos),
+            Ativo = true,
+            PlaceholderKey = spec.PlaceholderKey
+        };
+
+        _context.BuffsJogador.Add(novoBuff);
+        jogador.Buffs.Add(novoBuff);
+
+        var novosAtributos = _statsCalculator.CalcularAtributos(jogador);
+        if (spec.Atributo == "vida")
+        {
+            int deltaVida = spec.BonusValor - bonusVidaAnterior;
+            jogador.VidaAtual = Math.Clamp(jogador.VidaAtual + deltaVida, 0, novosAtributos.VidaFinal);
+        }
+        else if (spec.Atributo == "energia")
+        {
+            double deltaEnergia = spec.BonusValor - bonusEnergiaAnterior;
+            jogador.EnergiaAtual = Math.Clamp(
+                Math.Round(jogador.EnergiaAtual + deltaEnergia, 2),
+                0.0,
+                novosAtributos.EnergiaMaximaFinal);
+        }
+
+        return novoBuff;
     }
 
     private async Task<JogadorEstadoDto> ConstruirEstadoDtoAsync(

@@ -21,9 +21,7 @@ public class PlayerStatsCalculator
             .ToList();
 
         var agora = DateTime.UtcNow;
-        var buffsAtivos = jogador.Buffs
-            .Where(b => b.Ativo && (b.ExpiraEmUtc is null || b.ExpiraEmUtc > agora))
-            .ToList();
+        var buffsAtivos = ObterBuffsAtivosUnicosPorAtributo(jogador, agora);
 
         int modVida = itensEquipados.Sum(i => i.BonusVida) + buffsAtivos.Sum(b => b.BonusVida);
         double modEnergia = itensEquipados.Sum(i => i.BonusEnergia) + buffsAtivos.Sum(b => b.BonusEnergia);
@@ -153,24 +151,8 @@ public class PlayerStatsCalculator
         }).ToList();
 
         var agora = DateTime.UtcNow;
-        var buffs = jogador.Buffs
-            .Where(b => b.Ativo && (b.ExpiraEmUtc is null || b.ExpiraEmUtc > agora))
-            .Select(b => new BuffJogadorDto(
-                Id: b.Id,
-                Codigo: b.Codigo,
-                Nome: b.Nome,
-                Descricao: b.Descricao,
-                BonusVida: b.BonusVida,
-                BonusEnergia: b.BonusEnergia,
-                BonusDano: b.BonusDano,
-                BonusDefesa: b.BonusDefesa,
-                BonusVelocidade: b.BonusVelocidade,
-                DuracaoSegundos: b.DuracaoSegundos,
-                CondicaoDuracao: b.CondicaoDuracao,
-                ExpiraEmUtc: b.ExpiraEmUtc,
-                Ativo: b.Ativo,
-                PlaceholderKey: b.PlaceholderKey
-            ))
+        var buffs = ObterBuffsAtivosUnicosPorAtributo(jogador, agora)
+            .Select(MapearBuffJogador)
             .ToList();
 
         var statsEntity = jogador.Estatisticas;
@@ -313,5 +295,179 @@ public class PlayerStatsCalculator
             BonusVelocidade: def.BonusVelocidade,
             PlaceholderKey: def.PlaceholderKey
         );
+    }
+
+    public static BuffJogadorDto MapearBuffJogador(BuffJogador b)
+    {
+        return new BuffJogadorDto(
+            Id: b.Id,
+            Codigo: b.Codigo,
+            Nome: b.Nome,
+            Descricao: b.Descricao,
+            BonusVida: b.BonusVida,
+            BonusEnergia: b.BonusEnergia,
+            BonusDano: b.BonusDano,
+            BonusDefesa: b.BonusDefesa,
+            BonusVelocidade: b.BonusVelocidade,
+            DuracaoSegundos: b.DuracaoSegundos,
+            CondicaoDuracao: b.CondicaoDuracao,
+            // O SQLite devolve DateTime com Kind=Unspecified; sem marcar como UTC o JSON sai sem "Z"
+            // e o navegador interpreta o horário como local (ex.: +3h em UTC-3).
+            ExpiraEmUtc: b.ExpiraEmUtc.HasValue
+                ? DateTime.SpecifyKind(b.ExpiraEmUtc.Value, DateTimeKind.Utc)
+                : null,
+            Ativo: b.Ativo,
+            PlaceholderKey: b.PlaceholderKey
+        );
+    }
+
+    public static string IdentificarAtributoBuff(BuffJogador b)
+    {
+        if (b.BonusVida != 0) return "vida";
+        if (b.BonusEnergia != 0) return "energia";
+        if (b.BonusDano != 0) return "dano";
+        if (b.BonusDefesa != 0) return "defesa";
+        if (b.BonusVelocidade != 0) return "velocidade";
+
+        string key = (b.PlaceholderKey ?? b.Codigo ?? string.Empty).ToLowerInvariant();
+        if (key.Contains("vida")) return "vida";
+        if (key.Contains("energia")) return "energia";
+        if (key.Contains("dano")) return "dano";
+        if (key.Contains("defesa")) return "defesa";
+        if (key.Contains("velocidade")) return "velocidade";
+        return "outro";
+    }
+
+    /// <summary>
+    /// Retorna os buffs ativos e não expirados, garantindo no máximo 1 buff por atributo
+    /// (preservando a ordem de aquisição).
+    /// </summary>
+    public static List<BuffJogador> ObterBuffsAtivosUnicosPorAtributo(Jogador jogador, DateTime agora)
+    {
+        var validos = (jogador.Buffs ?? Array.Empty<BuffJogador>())
+            .Where(b => b.Ativo && (b.ExpiraEmUtc is null || b.ExpiraEmUtc > agora))
+            .OrderBy(b => b.CriadoEmUtc)
+            .ThenBy(b => b.Id)
+            .ToList();
+
+        var porAtributo = new Dictionary<string, BuffJogador>(StringComparer.OrdinalIgnoreCase);
+        foreach (var buff in validos)
+        {
+            string attr = IdentificarAtributoBuff(buff);
+            porAtributo[attr] = buff;
+        }
+
+        return porAtributo.Values
+            .OrderBy(b => b.CriadoEmUtc)
+            .ThenBy(b => b.Id)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Seção 4: Probabilidades de sorteio de atributo em Services (10 min = 600s, custo 50g):
+    /// - Vida (+15): 25% [0.00, 0.25)
+    /// - Energia (+20): 25% [0.25, 0.50)
+    /// - Dano (+4): 15% [0.50, 0.65)
+    /// - Defesa (+4): 15% [0.65, 0.80)
+    /// - Velocidade (+4): 20% [0.80, 1.00)
+    /// </summary>
+    public static string SortearAtributoServices(double roll)
+    {
+        if (roll < 0.25) return "vida";
+        if (roll < 0.50) return "energia";
+        if (roll < 0.65) return "dano";
+        if (roll < 0.80) return "defesa";
+        return "velocidade";
+    }
+
+    /// <summary>
+    /// Seção 5: Probabilidades de sorteio em Culture (5 min = 300s, gratuito):
+    /// - Vida (+20): 20% [0.00, 0.20)
+    /// - Energia (+40): 20% [0.20, 0.40)
+    /// - Dano (+6): 15% [0.40, 0.55)
+    /// - Defesa (+6): 15% [0.55, 0.70)
+    /// - Velocidade (+6): 20% [0.70, 0.90)
+    /// - Nenhum Aprimoramento: 10% [0.90, 1.00)
+    /// </summary>
+    public static string SortearResultadoCulture(double roll)
+    {
+        if (roll < 0.20) return "vida";
+        if (roll < 0.40) return "energia";
+        if (roll < 0.55) return "dano";
+        if (roll < 0.70) return "defesa";
+        if (roll < 0.90) return "velocidade";
+        return "nada";
+    }
+
+    public static bool EhAtributoBuffValido(string? atributo)
+    {
+        if (string.IsNullOrWhiteSpace(atributo)) return false;
+        string norm = atributo.Trim().ToLowerInvariant();
+        return norm is "vida" or "energia" or "dano" or "defesa" or "velocidade";
+    }
+
+    public static (
+        string Atributo,
+        string RotuloAtributo,
+        int BonusValor,
+        int DuracaoSegundos,
+        string NomeBuff,
+        string DescricaoBuff,
+        string PlaceholderKey
+    ) ObterEspecificacaoBuff(string atributo, string origem)
+    {
+        string normAttr = (atributo ?? string.Empty).Trim().ToLowerInvariant();
+        bool isCulture = string.Equals(origem, "culture", StringComparison.OrdinalIgnoreCase);
+        int duracaoSegundos = isCulture ? 300 : 600;
+        int minutos = duracaoSegundos / 60;
+
+        return normAttr switch
+        {
+            "vida" => (
+                "vida",
+                "Vida",
+                isCulture ? 20 : 15,
+                duracaoSegundos,
+                "Aprimoramento em Vida",
+                $"+{(isCulture ? 20 : 15)} de Vida ({minutos} min)",
+                "buff_vida"
+            ),
+            "energia" => (
+                "energia",
+                "Energia",
+                isCulture ? 40 : 20,
+                duracaoSegundos,
+                "Aprimoramento em Energia",
+                $"+{(isCulture ? 40 : 20)} de Energia ({minutos} min)",
+                "buff_energia"
+            ),
+            "dano" => (
+                "dano",
+                "Dano",
+                isCulture ? 6 : 4,
+                duracaoSegundos,
+                "Aprimoramento em Dano",
+                $"+{(isCulture ? 6 : 4)} de Dano ({minutos} min)",
+                "buff_dano"
+            ),
+            "defesa" => (
+                "defesa",
+                "Defesa",
+                isCulture ? 6 : 4,
+                duracaoSegundos,
+                "Aprimoramento em Defesa",
+                $"+{(isCulture ? 6 : 4)} de Defesa ({minutos} min)",
+                "buff_defesa"
+            ),
+            _ => (
+                "velocidade",
+                "Velocidade",
+                isCulture ? 6 : 4,
+                duracaoSegundos,
+                "Aprimoramento em Velocidade",
+                $"+{(isCulture ? 6 : 4)} de Velocidade ({minutos} min)",
+                "buff_velocidade"
+            ),
+        };
     }
 }
