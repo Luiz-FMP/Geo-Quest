@@ -8,11 +8,10 @@
 
 - [`Backend/`](./Backend): API HTTP em C# / ASP.NET Core (`.NET 10`) com persistência relacional **SQLite** (`geoquest.db`) e integração com Google Places API (New) e Google Directions API.
 - [`Frontend/`](./Frontend): Aplicação web interativa em **React 19 + Vite** integrada ao Google Maps JavaScript API (`@vis.gl/react-google-maps`).
-- [`Documentação/`](./Documentação): Documentação completa do projeto em português:
-  - [`Documentação/README.md`](./Documentação/README.md) — Guia completo de instalação, configuração de chaves, execução e mecânicas.
-  - [`Documentação/ESTRUTURA_DO_PROJETO.md`](./Documentação/ESTRUTURA_DO_PROJETO.md) — Mapa detalhado de todas as pastas, componentes, serviços, controllers e modelos.
-  - [`Documentação/CONTEXTO_DO_PROJETO.md`](./Documentação/CONTEXTO_DO_PROJETO.md) — Visão consolidada da arquitetura e funcionalidades implementadas.
-- [`docs/PROJECT_CONTEXT.md`](./docs/PROJECT_CONTEXT.md): Contexto técnico e de produto do repositório.
+- [`Documentação/`](./docs): Documentação do projeto em português e em inglês:
+  - [`Documentação/ESTRUTURA_DO_PROJETO.md`](./docs/ESTRUTURA_DO_PROJETO.md) — Mapa detalhado de todas as pastas, componentes, serviços, controllers e modelos.
+  - [`Documentação/CONTEXTO_DO_PROJETO.md`](./docs/CONTEXTO_DO_PROJETO.md) — Visão consolidada da arquitetura e funcionalidades implementadas.
+  - [`docs/PROJECT_CONTEXT.md`](./docs/PROJECT_CONTEXT.md): Contexto técnico e de produto do repositório.
 
 ---
 
@@ -40,6 +39,3 @@ cd Frontend
 npm install
 npm run dev
 ```
-
-Consulte [`Documentação/README.md`](./Documentação/README.md) para instruções completas.
-
