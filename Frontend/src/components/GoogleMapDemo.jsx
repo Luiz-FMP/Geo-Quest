@@ -599,15 +599,15 @@ function GameMapContent({
         frames[runFrameIndex % (frames.length || 1)] || markerFrames.idle;
       return {
         url,
-        scaledSize: { width: 46, height: 46 },
-        anchor: { x: 23, y: 43 },
+        scaledSize: { width: 64, height: 64 },
+        anchor: { x: 32, y: 59 },
       };
     }
 
     return {
       url: markerFrames.idle,
-      scaledSize: { width: 46, height: 46 },
-      anchor: { x: 23, y: 43 },
+      scaledSize: { width: 64, height: 64 },
+      anchor: { x: 32, y: 59 },
     };
   }, [
     charConfig.hasSprite,

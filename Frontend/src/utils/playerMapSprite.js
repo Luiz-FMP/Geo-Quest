@@ -11,23 +11,24 @@ const spriteCache = new Map();
 /**
  * Renderiza um recorte de sprite para um canvas de tamanho fixo com sombra suave nos pés.
  */
-function renderFrameToDataUrl(img, frame, flipX = false, targetSize = 48) {
+function renderFrameToDataUrl(img, frame, flipX = false, targetSize = 64) {
   const canvas = document.createElement("canvas");
   canvas.width = targetSize;
   canvas.height = targetSize;
   const ctx = canvas.getContext("2d");
   if (!ctx) return "";
 
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 
   // Sombra suave sob os pés
   ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
   ctx.beginPath();
   ctx.ellipse(
     targetSize / 2,
-    targetSize - 4,
-    targetSize * 0.32,
-    4,
+    targetSize - 5,
+    Math.round(targetSize * 0.28),
+    Math.max(3, Math.round(targetSize * 0.05)),
     0,
     0,
     Math.PI * 2
