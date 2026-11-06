@@ -1,30 +1,19 @@
 import { useEffect, useState } from "react";
 import { getCharacterPlaceholder } from "../config/placeholderAssets";
+import {
+  ORDERED_CHARACTERS,
+  getCharacterConfig,
+} from "../config/characterAssets";
 import { fetchPersonagensDisponiveis } from "../services/playerApi";
 
-const DEFAULT_CHARACTER_SLOTS = [
-  {
-    id: 1,
-    name: "Explorador #1",
-    subtitle: "Especialista em trilhas urbanas",
-    unlocked: true,
-    placeholderKey: "char_1",
-  },
-  {
-    id: 2,
-    name: "Cartógrafo #2",
-    subtitle: "Mapeamento tático de pontos históricos",
-    unlocked: true,
-    placeholderKey: "char_2",
-  },
-  {
-    id: 3,
-    name: "Guardião #3",
-    subtitle: "Expedições longas e defesa",
-    unlocked: true,
-    placeholderKey: "char_3",
-  },
-];
+const DEFAULT_CHARACTER_SLOTS = ORDERED_CHARACTERS.map((char) => ({
+  id: char.id,
+  name: char.name,
+  subtitle: char.description,
+  unlocked: true,
+  placeholderKey: char.placeholderKey,
+  icon: char.icon,
+}));
 
 export default function CharacterSelectScreen({
   coords,
@@ -42,17 +31,38 @@ export default function CharacterSelectScreen({
     fetchPersonagensDisponiveis()
       .then((list) => {
         if (!active || !Array.isArray(list) || list.length === 0) return;
-        const mapped = list.map((p) => ({
-          id: p.id,
-          name: p.nome,
-          subtitle: p.descricao || p.vantagem || "Disponível",
-          unlocked: p.disponivel !== false,
-          placeholderKey: p.placeholderKey || `char_${p.id}`,
-        }));
+        const mapped = list.map((p) => {
+          const cfg = getCharacterConfig(p.nome || p.id);
+          return {
+            id: p.id,
+            name: p.nome || cfg.name,
+            subtitle: p.descricao || cfg.description,
+            unlocked: p.disponivel !== false,
+            placeholderKey: p.placeholderKey || cfg.placeholderKey,
+            icon: cfg.icon,
+          };
+        });
+        // Garante que existam os 4 personagens se a API retornar menos
+        if (mapped.length < 4) {
+          const ids = new Set(mapped.map((m) => m.id));
+          ORDERED_CHARACTERS.forEach((c) => {
+            if (!ids.has(c.id)) {
+              mapped.push({
+                id: c.id,
+                name: c.name,
+                subtitle: c.description,
+                unlocked: true,
+                placeholderKey: c.placeholderKey,
+                icon: c.icon,
+              });
+            }
+          });
+        }
+        mapped.sort((a, b) => a.id - b.id);
         setSlots(mapped);
       })
       .catch(() => {
-        // Mantém fallback local caso o backend esteja indisponível
+        // Mantém fallback local com os 4 personagens
       });
     return () => {
       active = false;
@@ -66,12 +76,12 @@ export default function CharacterSelectScreen({
     <div
       style={{
         width: "100%",
-        maxWidth: 680,
+        maxWidth: 1060,
         zIndex: 2,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        padding: "24px",
+        padding: "24px 16px",
       }}
     >
       <span
@@ -90,7 +100,7 @@ export default function CharacterSelectScreen({
       <h2
         style={{
           margin: 0,
-          fontSize: 34,
+          fontSize: 32,
           fontWeight: 700,
           color: "#EDE6D3",
           textAlign: "center",
@@ -101,8 +111,8 @@ export default function CharacterSelectScreen({
 
       <p
         style={{
-          marginTop: 8,
-          marginBottom: 28,
+          marginTop: 6,
+          marginBottom: 24,
           fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
           fontSize: 12,
           color: "#8A9A8C",
@@ -111,13 +121,14 @@ export default function CharacterSelectScreen({
       >
         {coords
           ? `Localização definida (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`
-          : "Selecione o personagem ativo do seu perfil"}
+          : "Selecione o personagem ativo para a sua jornada"}
       </p>
 
+      {/* 4 personagens alinhados na mesma linha */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
           gap: 16,
           width: "100%",
           marginBottom: 28,
@@ -126,6 +137,7 @@ export default function CharacterSelectScreen({
         {slots.map((slot) => {
           const isSelected = slot.id === selectedId;
           const visual = getCharacterPlaceholder(slot.placeholderKey || slot.id);
+          const charCfg = getCharacterConfig(slot.name || slot.id);
 
           if (!slot.unlocked) {
             return (
@@ -136,30 +148,29 @@ export default function CharacterSelectScreen({
                   background: "#0B0E0C",
                   border: "1px solid #1E2620",
                   borderRadius: 10,
-                  padding: "24px 16px",
+                  padding: "20px 14px",
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: 0.65,
+                  opacity: 0.6,
                   cursor: "not-allowed",
-                  minHeight: 210,
+                  minHeight: 230,
                 }}
               >
                 <div
                   style={{
-                    width: 56,
-                    height: 56,
+                    width: 64,
+                    height: 64,
                     background: "#050706",
                     border: "1px solid #1B221C",
-                    borderRadius: 6,
+                    borderRadius: 8,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    marginBottom: 16,
+                    marginBottom: 14,
                     color: "#3A4A3C",
-                    fontFamily: "'IBM Plex Mono', monospace",
-                    fontSize: 20,
+                    fontSize: 22,
                   }}
                 >
                   🔒
@@ -168,7 +179,7 @@ export default function CharacterSelectScreen({
                 <div
                   style={{
                     fontSize: 16,
-                    fontWeight: 600,
+                    fontWeight: 700,
                     color: "#4B584D",
                     marginBottom: 6,
                     textAlign: "center",
@@ -183,6 +194,7 @@ export default function CharacterSelectScreen({
                     fontSize: 11,
                     color: "#3A463C",
                     textAlign: "center",
+                    lineHeight: 1.4,
                   }}
                 >
                   {slot.subtitle}
@@ -199,37 +211,74 @@ export default function CharacterSelectScreen({
               style={{
                 background: isSelected ? "#1F2A22" : "#18201A",
                 border: isSelected ? "2px solid #C89B5C" : "1px solid #2E3B30",
+                boxShadow: isSelected
+                  ? "0 0 18px rgba(200, 155, 92, 0.35)"
+                  : "none",
                 borderRadius: 10,
-                padding: "24px 16px",
+                padding: "20px 14px",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                justifyContent: "center",
+                justifyContent: "flex-start",
                 cursor: "pointer",
-                minHeight: 210,
+                minHeight: 230,
                 color: "#EDE6D3",
-                transition: "all 0.2s ease",
+                transition: "all 0.18s ease",
+                position: "relative",
               }}
             >
+              {isSelected && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#161D18",
+                    background: "#C89B5C",
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    fontFamily: "'IBM Plex Mono', monospace",
+                  }}
+                >
+                  ATIVO
+                </div>
+              )}
+
+              {/* Ícone do Personagem */}
               <div
-                title={visual.shapeLabel}
                 style={{
-                  width: 52,
-                  height: 52,
-                  background: visual.color,
-                  border: `3px solid ${visual.borderColor}`,
-                  boxShadow: `0 0 16px ${visual.glow}`,
-                  marginBottom: 16,
+                  width: 68,
+                  height: 68,
+                  borderRadius: 8,
+                  background: "#101612",
+                  border: `2px solid ${isSelected ? "#C89B5C" : visual.borderColor || "#2E3B30"}`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "#FFFFFF",
+                  marginBottom: 14,
+                  overflow: "hidden",
+                  boxShadow: `0 0 14px ${charCfg.glow || visual.glow}`,
                 }}
               >
-                {visual.badgeText}
+                <img
+                  src={charCfg.icon || slot.icon}
+                  alt={slot.name}
+                  style={{
+                    width: 58,
+                    height: 58,
+                    objectFit: "contain",
+                    imageRendering: "pixelated",
+                  }}
+                  onError={(e) => {
+                    // Fallback para quadrado se a imagem falhar
+                    e.currentTarget.style.display = "none";
+                    if (e.currentTarget.parentNode) {
+                      e.currentTarget.parentNode.style.background = visual.color;
+                    }
+                  }}
+                />
               </div>
 
               <div
@@ -248,8 +297,9 @@ export default function CharacterSelectScreen({
                 style={{
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontSize: 11,
-                  color: "#C89B5C",
+                  color: isSelected ? "#C89B5C" : "#9CAEA0",
                   textAlign: "center",
+                  lineHeight: 1.35,
                 }}
               >
                 {slot.subtitle}

@@ -51,6 +51,14 @@ export const CHARACTER_PLACEHOLDERS = {
     badgeText: "GRD-03",
     shapeLabel: "Quadrado Âmbar (Placeholder)",
   },
+  char_4: {
+    id: 4,
+    color: "#60A5FA",
+    borderColor: "#93C5FD",
+    glow: "rgba(96, 165, 250, 0.55)",
+    badgeText: "Z-04",
+    shapeLabel: "Quadrado Tático (Placeholder)",
+  },
 };
 
 export function getCharacterPlaceholder(placeholderKeyOrId) {

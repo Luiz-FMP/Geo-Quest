@@ -7,6 +7,8 @@ import {
   useMapsLibrary,
 } from "@vis.gl/react-google-maps";
 import { getCharacterPlaceholder } from "../config/placeholderAssets";
+import { getCharacterConfig } from "../config/characterAssets";
+import { precomputePlayerMarkerFrames } from "../utils/playerMapSprite";
 import {
   COMBAT_TYPES,
   iniciarSessaoCombate,
@@ -31,6 +33,11 @@ import RecoveryModal from "./RecoveryModal";
 const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v2";
 const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
+// Raio de busca de POIs ao redor do jogador e quantidade máxima exibida no mapa.
+const NEARBY_PLACES_RADIUS_METERS = 1200;
+const NEARBY_MAX_PLACES = 18;
+// O backend faz até 2 rodadas de consultas à Places API para garantir diversidade.
+const NEARBY_BACKEND_TIMEOUT_MS = 8000;
 const PROGRESSIVE_TRANSPORT_RADII_METERS = [5000, 15000, 30000, 50000];
 // A busca de transporte acumula destinos até existir pelo menos um além desta distância.
 const FAR_TRANSPORT_DESTINATION_THRESHOLD_KM = 5;
@@ -148,16 +155,45 @@ function createCharacterSquareDataUrl(
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+function isPlaceCompletedOrBenefited(place, playerState) {
+  if (!place) return false;
+  if (place.concluido) return true;
+  const estados = playerState?.estadosPlaces;
+  if (!Array.isArray(estados)) return false;
+  const estado = estados.find((e) => e.placeId === place.id);
+  if (!estado) return false;
+  return Boolean(
+    estado.concluido ||
+      estado.curaGratuitaUtilizada ||
+      estado.lojaEsgotada ||
+      estado.estadoInteracao === "Concluido" ||
+      estado.estadoInteracao === "CuraUtilizada" ||
+      estado.estadoInteracao === "LojaEsgotada",
+  );
+}
+
 function createPlaceIconDataUrl(
   color = "#C89B5C",
   isSelected = false,
   isBossSpecial = false,
+  isCompleted = false,
 ) {
-  const stroke = isSelected ? "#FFFFFF" : isBossSpecial ? "#FCD34D" : "#161D18";
-  const size = isSelected ? 30 : isBossSpecial ? 28 : 24;
+  // POIs concluídos: borda dourada (#FCD34D, mesma referência do Boss).
+  // POIs não concluídos: borda preta (#161D18). Boss mantém borda dourada.
+  const stroke = isSelected
+    ? isCompleted || isBossSpecial
+      ? "#FEF08A"
+      : "#FFFFFF"
+    : isCompleted || isBossSpecial
+      ? "#FCD34D"
+      : "#161D18";
+  const strokeWidth = isSelected ? "3.5" : "2.5";
+  // shopping_mall (Boss) possui tamanho maior que os demais POIs
+  const size = isBossSpecial ? (isSelected ? 36 : 30) : isSelected ? 30 : 24;
+  const dotColor = isCompleted ? "#FCD34D" : "#161D18";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 28 28">
-    <rect x="4" y="4" width="20" height="20" fill="${color}" stroke="${stroke}" stroke-width="2.5" rx="3" />
-    <circle cx="14" cy="14" r="3.5" fill="#161D18" />
+    <rect x="4" y="4" width="20" height="20" fill="${color}" stroke="${stroke}" stroke-width="${strokeWidth}" rx="3" />
+    <circle cx="14" cy="14" r="3.5" fill="${dotColor}" />
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
@@ -245,7 +281,11 @@ function calculatePathDistanceKm(points) {
   return Number(totalKm.toFixed(3));
 }
 
-function sortPlacesByProximity(placesList, centerCoords, maxResults = 18) {
+function sortPlacesByProximity(
+  placesList,
+  centerCoords,
+  maxResults = NEARBY_MAX_PLACES,
+) {
   if (!Array.isArray(placesList)) return [];
   const seen = new Set();
   const unique = [];
@@ -262,7 +302,7 @@ function sortPlacesByProximity(placesList, centerCoords, maxResults = 18) {
         lng: p.lng,
       }),
     }))
-    .filter((p) => p.distanceFromCenterKm <= 1.6)
+    .filter((p) => p.distanceFromCenterKm <= NEARBY_PLACES_RADIUS_METERS / 1000)
     .sort((a, b) => a.distanceFromCenterKm - b.distanceFromCenterKm)
     .slice(0, maxResults);
 }
@@ -481,11 +521,97 @@ function GameMapContent({
     character?.placeholderKey || character?.id || 1,
   );
 
+  const charConfig = useMemo(
+    () => getCharacterConfig(character?.name || character?.id || 1),
+    [character?.name, character?.id]
+  );
+
   const characterSquareIcon = useMemo(
     () =>
       createCharacterSquareDataUrl(charVisual.color, charVisual.borderColor),
     [charVisual.color, charVisual.borderColor],
   );
+
+  const [markerFrames, setMarkerFrames] = useState(null);
+  const [runFrameIndex, setRunFrameIndex] = useState(0);
+  const [movingDirection, setMovingDirection] = useState("right");
+  const prevCoordRef = useRef(playerCoords);
+
+  // Pré-computa os frames para o mapa se o personagem tiver spritesheet
+  useEffect(() => {
+    let isSubscribed = true;
+    if (charConfig.hasSprite) {
+      precomputePlayerMarkerFrames(charConfig.name).then((frames) => {
+        if (isSubscribed) setMarkerFrames(frames);
+      });
+    } else {
+      setMarkerFrames(null);
+    }
+    return () => {
+      isSubscribed = false;
+    };
+  }, [charConfig.name, charConfig.hasSprite]);
+
+  // Rastreia a direção do movimento horizontal (oeste -> esquerda, leste -> direita)
+  useEffect(() => {
+    if (playerCoords && prevCoordRef.current) {
+      const dx = playerCoords.lng - prevCoordRef.current.lng;
+      if (dx < -0.000001) {
+        setMovingDirection("left");
+      } else if (dx > 0.000001) {
+        setMovingDirection("right");
+      }
+    }
+    prevCoordRef.current = playerCoords;
+  }, [playerCoords]);
+
+  // Loop suave da animação de corrida (avança frames sem salto brusco)
+  useEffect(() => {
+    if (!isMoving || !charConfig.hasSprite || !markerFrames) {
+      setRunFrameIndex(0);
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setRunFrameIndex((prev) => prev + 1);
+    }, 110);
+
+    return () => clearInterval(intervalId);
+  }, [isMoving, charConfig.hasSprite, markerFrames]);
+
+  // Ícone dinâmico do marcador do jogador no mapa
+  const playerMarkerIcon = useMemo(() => {
+    if (!charConfig.hasSprite || !markerFrames) {
+      return characterSquareIcon;
+    }
+
+    if (isMoving) {
+      const frames =
+        movingDirection === "left"
+          ? markerFrames.runLeft
+          : markerFrames.runRight;
+      const url =
+        frames[runFrameIndex % (frames.length || 1)] || markerFrames.idle;
+      return {
+        url,
+        scaledSize: { width: 46, height: 46 },
+        anchor: { x: 23, y: 43 },
+      };
+    }
+
+    return {
+      url: markerFrames.idle,
+      scaledSize: { width: 46, height: 46 },
+      anchor: { x: 23, y: 43 },
+    };
+  }, [
+    charConfig.hasSprite,
+    markerFrames,
+    isMoving,
+    movingDirection,
+    runFrameIndex,
+    characterSquareIcon,
+  ]);
 
   const stopMovementAnimation = useCallback(() => {
     if (animationTimerRef.current) {
@@ -567,7 +693,7 @@ function GameMapContent({
             ...cachedHit.places,
             ...allDiscoveredPlacesRef.current,
           ];
-          const reordered = sortPlacesByProximity(combined, center, 18);
+          const reordered = sortPlacesByProximity(combined, center);
           if (reordered.length > 0) {
             setPlaces(reordered);
             setPlacesError(null);
@@ -587,153 +713,165 @@ function GameMapContent({
       setIsLoadingPlaces(true);
       setPlacesError(null);
 
+      const showPlaces = (normalized) => {
+        if (normalized.length > 0) {
+          registerDiscoveredPlaces(center, normalized);
+        }
+        const sorted = sortPlacesByProximity(
+          [...normalized, ...allDiscoveredPlacesRef.current],
+          center,
+        );
+        inFlightCenterRef.current = null;
+        setPlaces(sorted);
+        setPlacesError(
+          sorted.length === 0
+            ? "Nenhum ponto de interesse permitido encontrado próximo a este local."
+            : null,
+        );
+        setIsLoadingPlaces(false);
+      };
+
+      const showError = (message) => {
+        inFlightCenterRef.current = null;
+        setPlacesError(message);
+        setIsLoadingPlaces(false);
+      };
+
       // 2. Tenta Backend API primeiro se configurado/disponível
       const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+      // Erro que o backend recebeu do Google (cota, chave recusada...), para não ser mascarado pelo fallback.
+      let backendError = null;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2200);
+        const timeoutId = setTimeout(
+          () => controller.abort(),
+          NEARBY_BACKEND_TIMEOUT_MS,
+        );
         const response = await fetch(
-          `${apiBase}/api/places/nearby?lat=${encodeURIComponent(center.lat)}&lng=${encodeURIComponent(center.lng)}&radius=1200`,
+          `${apiBase}/api/places/nearby?lat=${encodeURIComponent(center.lat)}&lng=${encodeURIComponent(center.lng)}&radius=${NEARBY_PLACES_RADIUS_METERS}`,
           { signal: controller.signal },
         );
         clearTimeout(timeoutId);
+        const data = await response.json().catch(() => null);
 
         if (response.ok) {
-          const data = await response.json();
+          // O backend consultou o Google com sucesso (mesmo que sem resultados): não há por que repetir no navegador.
           const rawList = Array.isArray(data?.places) ? data.places : [];
-          const normalized = rawList
-            .map((item, idx) => normalizePlaceRecord(item, idx))
-            .filter(Boolean);
+          showPlaces(
+            rawList
+              .map((item, idx) => normalizePlaceRecord(item, idx))
+              .filter(Boolean),
+          );
+          return;
+        }
 
-          if (normalized.length > 0) {
-            registerDiscoveredPlaces(center, normalized);
-            const sorted = sortPlacesByProximity(
-              [...normalized, ...allDiscoveredPlacesRef.current],
-              center,
-              18,
-            );
-            setPlaces(sorted);
-            setIsLoadingPlaces(false);
-            inFlightCenterRef.current = null;
-            return;
-          }
+        if (data?.error && data.error !== "MISSING_API_KEY") {
+          backendError = {
+            code: data.error,
+            message: data.message || data.error,
+          };
         }
       } catch {
-        // Backend indisponível ou chave configurada apenas no frontend; continua para Maps JS Places
+        // Backend indisponível ou tempo esgotado; continua para a busca no navegador
       }
 
-      // 3. Fallback para Google Maps JavaScript Places Library no navegador
-      try {
-        const service = new placesLib.PlacesService(map);
-        service.nearbySearch(
-          {
-            location: center,
-            radius: 1200,
-          },
-          async (results, status) => {
-            inFlightCenterRef.current = null;
-
-            if (
-              status === placesLib.PlacesServiceStatus.OK &&
-              Array.isArray(results) &&
-              results.length > 0
-            ) {
-              const normalized = results
-                .map((item, idx) => normalizePlaceRecord(item, idx))
-                .filter(Boolean);
-
-              if (normalized.length > 0) {
-                registerDiscoveredPlaces(center, normalized);
-                const sorted = sortPlacesByProximity(
-                  [...normalized, ...allDiscoveredPlacesRef.current],
-                  center,
-                  18,
-                );
-                setPlaces(sorted);
-                setIsLoadingPlaces(false);
-                return;
-              }
-            }
-
-            if (status === placesLib.PlacesServiceStatus.ZERO_RESULTS) {
-              setPlaces([]);
-              setPlacesError(
-                "Nenhum ponto de interesse permitido encontrado próximo a este local.",
-              );
-              setIsLoadingPlaces(false);
-              return;
-            }
-
-            // Tenta Places API (New) Place.searchNearby se disponível
-            if (typeof placesLib.Place?.searchNearby === "function") {
-              try {
-                const { places: newPlaces } =
-                  await placesLib.Place.searchNearby({
-                    fields: [
-                      "id",
-                      "displayName",
-                      "location",
-                      "primaryType",
-                      "types",
-                      "formattedAddress",
-                    ],
-                    locationRestriction: {
-                      center,
-                      radius: 1200,
-                    },
-                    maxResultCount: 18,
-                  });
-
-                const normalized = (newPlaces || [])
-                  .map((p, idx) =>
-                    normalizePlaceRecord(
-                      {
-                        id: p.id,
-                        name: p.displayName,
-                        lat:
-                          typeof p.location?.lat === "function"
-                            ? p.location.lat()
-                            : p.location?.lat,
-                        lng:
-                          typeof p.location?.lng === "function"
-                            ? p.location.lng()
-                            : p.location?.lng,
-                        primaryType: p.primaryType,
-                        types: p.types,
-                        address: p.formattedAddress,
-                      },
-                      idx,
-                    ),
-                  )
-                  .filter(Boolean);
-
-                if (normalized.length > 0) {
-                  registerDiscoveredPlaces(center, normalized);
-                  const sorted = sortPlacesByProximity(
-                    [...normalized, ...allDiscoveredPlacesRef.current],
-                    center,
-                    18,
-                  );
-                  setPlaces(sorted);
-                  setIsLoadingPlaces(false);
-                  return;
-                }
-              } catch {
-                // Tratado abaixo
-              }
-            }
-
-            setPlacesError(
-              `Não foi possível carregar pontos de interesse (Status: ${status || "ERRO_API"}). Verifique se a Google Places API está habilitada.`,
-            );
-            setIsLoadingPlaces(false);
-          },
+      // Cota é do projeto Google inteiro: o navegador usaria a mesma cota, então só gastaria tentativas.
+      if (backendError?.code === "OVER_QUERY_LIMIT") {
+        showError(
+          "Cota diária da Google Places API esgotada. Os pontos de interesse voltam quando a cota renovar (ou aumente a cota no Google Cloud Console).",
         );
-      } catch {
-        inFlightCenterRef.current = null;
-        setPlacesError("Erro ao inicializar o serviço Google Places.");
-        setIsLoadingPlaces(false);
+        return;
       }
+
+      // 3. Fallback no navegador: Places API (New) primeiro; a API legada fica por último
+      //    (projetos Google Cloud novos não conseguem habilitá-la e ela retorna REQUEST_DENIED).
+      let browserError = null;
+
+      if (typeof placesLib.Place?.searchNearby === "function") {
+        try {
+          const { places: newPlaces } = await placesLib.Place.searchNearby({
+            fields: [
+              "id",
+              "displayName",
+              "location",
+              "primaryType",
+              "types",
+              "formattedAddress",
+            ],
+            locationRestriction: {
+              center,
+              radius: NEARBY_PLACES_RADIUS_METERS,
+            },
+            maxResultCount: PLACES_NEARBY_MAX_RESULTS,
+          });
+
+          showPlaces(
+            (newPlaces || [])
+              .map((p, idx) =>
+                normalizePlaceRecord(
+                  {
+                    id: p.id,
+                    name: p.displayName,
+                    lat:
+                      typeof p.location?.lat === "function"
+                        ? p.location.lat()
+                        : p.location?.lat,
+                    lng:
+                      typeof p.location?.lng === "function"
+                        ? p.location.lng()
+                        : p.location?.lng,
+                    primaryType: p.primaryType,
+                    types: p.types,
+                    address: p.formattedAddress,
+                  },
+                  idx,
+                ),
+              )
+              .filter(Boolean),
+          );
+          return;
+        } catch (error) {
+          browserError = error?.message || "Places API (New) indisponível";
+        }
+      }
+
+      let legacyStatus = null;
+      if (placesLib.PlacesService) {
+        try {
+          const legacy = await new Promise((resolve) => {
+            const service = new placesLib.PlacesService(map);
+            service.nearbySearch(
+              { location: center, radius: NEARBY_PLACES_RADIUS_METERS },
+              (results, status) => resolve({ results, status }),
+            );
+          });
+          legacyStatus = legacy.status;
+
+          if (
+            legacy.status === placesLib.PlacesServiceStatus.OK ||
+            legacy.status === placesLib.PlacesServiceStatus.ZERO_RESULTS
+          ) {
+            showPlaces(
+              (Array.isArray(legacy.results) ? legacy.results : [])
+                .map((item, idx) => normalizePlaceRecord(item, idx))
+                .filter(Boolean),
+            );
+            return;
+          }
+        } catch {
+          legacyStatus = "ERRO_API";
+        }
+      }
+
+      // Mostra a causa mais informativa: o erro do backend (vem do Google com mensagem clara),
+      // depois o da Places API (New) no navegador e, por último, o status da API legada.
+      const reason =
+        backendError?.message ||
+        browserError ||
+        (legacyStatus ? `Status: ${legacyStatus}` : "ERRO_API");
+      showError(
+        `Não foi possível carregar pontos de interesse (${reason}). Verifique se a Places API (New) está habilitada e com cota disponível.`,
+      );
     },
     [initialCoords, map, placesLib, registerDiscoveredPlaces],
   );
@@ -2027,11 +2165,11 @@ function GameMapContent({
           }
           style={{ width: "100%", height: "100%" }}
         >
-          {/* Marcador do Jogador */}
+          {/* Marcador do Jogador (Sprite Animado ou Fallback Quadrado) */}
           <Marker
             position={playerCoords}
             title={`${characterName} (Sua posição)`}
-            icon={characterSquareIcon}
+            icon={playerMarkerIcon}
             zIndex={1000}
           />
 
@@ -2049,16 +2187,23 @@ function GameMapContent({
           {!isTransportModeActive &&
             places.map((place) => {
               const isSelected = selectedPlace?.id === place.id;
+              const isCompleted = isPlaceCompletedOrBenefited(
+                place,
+                playerState,
+              );
+              const iconData = createPlaceIconDataUrl(
+                place.color,
+                isSelected,
+                place.isBossSpecial,
+                isCompleted,
+              );
+
               return (
                 <Marker
                   key={place.id}
                   position={{ lat: place.lat, lng: place.lng }}
                   title={`${place.name} (${place.category})`}
-                  icon={createPlaceIconDataUrl(
-                    place.color,
-                    isSelected,
-                    place.isBossSpecial,
-                  )}
+                  icon={iconData}
                   zIndex={isSelected ? 500 : place.isBossSpecial ? 300 : 100}
                   onClick={() => handleSelectPlace(place)}
                 />
@@ -2123,16 +2268,39 @@ function GameMapContent({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {/* Ícone do Personagem no HUD Superior */}
             <div
               style={{
-                width: 28,
-                height: 28,
-                background: charVisual.color,
-                border: `2px solid ${charVisual.borderColor}`,
-                borderRadius: 4,
+                width: 34,
+                height: 34,
+                borderRadius: 6,
+                background: "#101612",
+                border: `2px solid ${charVisual.borderColor || "#C89B5C"}`,
+                boxShadow: `0 0 10px ${charConfig.glow || charVisual.glow}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
                 flexShrink: 0,
               }}
-            />
+            >
+              <img
+                src={charConfig.icon}
+                alt={characterName}
+                style={{
+                  width: 30,
+                  height: 30,
+                  objectFit: "contain",
+                  imageRendering: "pixelated",
+                }}
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                  if (e.currentTarget.parentNode) {
+                    e.currentTarget.parentNode.style.background = charVisual.color;
+                  }
+                }}
+              />
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <div
                 style={{

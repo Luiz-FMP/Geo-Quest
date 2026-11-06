@@ -138,44 +138,58 @@ public static class DatabaseInitializer
                 new()
                 {
                     Id = 1,
-                    Nome = "Explorador #1",
-                    Descricao = "Especialista em trilhas urbanas e reconhecimento de rotas.",
-                    Vida = 50,
-                    Ataque = 10,
-                    Defesa = 0,
+                    Nome = "Miguel",
+                    Descricao = "Forte e resistente, aguenta vários combates.",
+                    Vida = 120,
+                    Ataque = 15,
+                    Defesa = 10,
                     Velocidade = 12,
                     Energia = 100,
-                    Vantagem = "Equilibrado",
+                    Vantagem = "Resistência a dano",
                     Disponivel = true,
                     PlaceholderKey = "char_1"
                 },
                 new()
                 {
                     Id = 2,
-                    Nome = "Cartógrafo #2",
-                    Descricao = "Focado em mapeamento tático de pontos históricos e culturais.",
-                    Vida = 50,
-                    Ataque = 10,
-                    Defesa = 0,
+                    Nome = "Amélia",
+                    Descricao = "Frágil, mas causa muito dano.",
+                    Vida = 70,
+                    Ataque = 30,
+                    Defesa = 3,
                     Velocidade = 14,
                     Energia = 100,
-                    Vantagem = "Reconhecimento",
+                    Vantagem = "Ataques únicos que causam muito dano.",
                     Disponivel = true,
                     PlaceholderKey = "char_2"
                 },
                 new()
                 {
                     Id = 3,
-                    Nome = "Guardião #3",
-                    Descricao = "Preparado para expedições longas e defesa de territórios.",
-                    Vida = 50,
+                    Nome = "Benjamin",
+                    Descricao = "Resistente e ágil, consegue disparar varios golpes.",
+                    Vida = 100,
                     Ataque = 10,
-                    Defesa = 0,
+                    Defesa = 7,
                     Velocidade = 10,
                     Energia = 100,
-                    Vantagem = "Resistência",
+                    Vantagem = "Múltiplos ataques.",
                     Disponivel = true,
                     PlaceholderKey = "char_3"
+                },
+                new()
+                {
+                    Id = 4,
+                    Nome = "Z",
+                    Descricao = "Controle de área, explosões em área.",
+                    Vida = 75,
+                    Ataque = 20,
+                    Defesa = 5,
+                    Velocidade = 13,
+                    Energia = 100,
+                    Vantagem = "Dano em área.",
+                    Disponivel = true,
+                    PlaceholderKey = "char_4"
                 }
             };
 
@@ -200,44 +214,23 @@ public static class DatabaseInitializer
                 }
             }
 
-            if (existentes.Count < 3)
+            if (existentes.All(p => p.Id != 4))
             {
-                if (existentes.All(p => p.Id != 2))
+                context.Personagens.Add(new Personagem
                 {
-                    context.Personagens.Add(new Personagem
-                    {
-                        Id = 2,
-                        Nome = "Cartógrafo #2",
-                        Descricao = "Focado em mapeamento tático de pontos históricos e culturais.",
-                        Vida = 50,
-                        Ataque = 10,
-                        Defesa = 0,
-                        Velocidade = 14,
-                        Energia = 100,
-                        Vantagem = "Reconhecimento",
-                        Disponivel = true,
-                        PlaceholderKey = "char_2"
-                    });
-                    alterou = true;
-                }
-                if (existentes.All(p => p.Id != 3))
-                {
-                    context.Personagens.Add(new Personagem
-                    {
-                        Id = 3,
-                        Nome = "Guardião #3",
-                        Descricao = "Preparado para expedições longas e defesa de territórios.",
-                        Vida = 50,
-                        Ataque = 10,
-                        Defesa = 0,
-                        Velocidade = 10,
-                        Energia = 100,
-                        Vantagem = "Resistência",
-                        Disponivel = true,
-                        PlaceholderKey = "char_3"
-                    });
-                    alterou = true;
-                }
+                    Id = 4,
+                    Nome = "Z",
+                    Descricao = "Controle de área, explosões em área.",
+                    Vida = 75,
+                    Ataque = 20,
+                    Defesa = 5,
+                    Velocidade = 13,
+                    Energia = 100,
+                    Vantagem = "Dano em área.",
+                    Disponivel = true,
+                    PlaceholderKey = "char_4"
+                });
+                alterou = true;
             }
 
             if (alterou)

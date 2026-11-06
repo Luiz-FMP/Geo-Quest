@@ -410,7 +410,7 @@ export default function GeoQuestHome() {
         name: playerState.personagemAtual.nome,
         placeholderKey: playerState.personagemAtual.placeholderKey,
       }
-    : { id: 1, name: "Explorador #1", placeholderKey: "char_1" };
+    : { id: 1, name: "Miguel", placeholderKey: "char_1" };
 
   if (screen === "map" && coords) {
     return (
@@ -529,7 +529,7 @@ export default function GeoQuestHome() {
           }}
         >
           JOGADOR: <strong>{playerState.nome}</strong> •{" "}
-          {playerState.personagemAtual?.nome || "Explorador #1"} • PODER:{" "}
+          {playerState.personagemAtual?.nome || "Miguel"} • PODER:{" "}
           <strong>{playerState.atributos?.nivelDePoder ?? 10}</strong> • MOEDAS:{" "}
           <strong>
             {playerState.moedas ?? playerState.atributos?.moedas ?? 0}

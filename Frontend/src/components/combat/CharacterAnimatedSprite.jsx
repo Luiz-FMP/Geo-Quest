@@ -1,113 +1,80 @@
 import { useEffect, useRef } from "react";
+import { getCharacterConfig } from "../../config/characterAssets";
 
 /**
- * Definições de frames calibradas a partir dos sprite sheets transparentes (500x500).
- * Espelha fielmente a arquitetura das classes C# (Animation, SpriteFrame, Animator).
- */
-const CHARACTER_CONFIGS = {
-  miguel: {
-    sheetUrl: "/sprites/sprite_sheet_miguel.png",
-    idle: {
-      frameDuration: 0.22,
-      isPingPong: true,
-      isLooping: true,
-      frames: [
-        { x: 11, y: 290, width: 55, height: 66, anchorX: 0.5, anchorY: 1.0 },
-        { x: 65, y: 291, width: 48, height: 65, anchorX: 0.5, anchorY: 1.0 },
-        { x: 110, y: 291, width: 57, height: 65, anchorX: 0.5, anchorY: 1.0 },
-        { x: 165, y: 261, width: 57, height: 95, anchorX: 0.5, anchorY: 1.0 },
-      ],
-    },
-  },
-  amelia: {
-    sheetUrl: "/sprites/sprite_sheet_amelia.png",
-    idle: {
-      frameDuration: 0.22,
-      isPingPong: true,
-      isLooping: true,
-      frames: [
-        { x: 10, y: 270, width: 56, height: 86, anchorX: 0.5, anchorY: 1.0 },
-        { x: 60, y: 270, width: 56, height: 86, anchorX: 0.5, anchorY: 1.0 },
-        { x: 110, y: 270, width: 61, height: 86, anchorX: 0.5, anchorY: 1.0 },
-        { x: 165, y: 260, width: 65, height: 96, anchorX: 0.5, anchorY: 1.0 },
-      ],
-    },
-  },
-  benjamin: {
-    sheetUrl: "/sprites/sprite_sheet_benjamin.png",
-    idle: {
-      frameDuration: 0.22,
-      isPingPong: true,
-      isLooping: true,
-      frames: [
-        { x: 11, y: 264, width: 55, height: 90, anchorX: 0.5, anchorY: 1.0 },
-        { x: 60, y: 264, width: 56, height: 90, anchorX: 0.5, anchorY: 1.0 },
-        { x: 110, y: 264, width: 61, height: 90, anchorX: 0.5, anchorY: 1.0 },
-        { x: 165, y: 264, width: 66, height: 90, anchorX: 0.5, anchorY: 1.0 },
-      ],
-    },
-  },
-  z: {
-    sheetUrl: "/sprites/sprite_sheet_z.png",
-    idle: {
-      frameDuration: 0.22,
-      isPingPong: true,
-      isLooping: true,
-      frames: [
-        { x: 10, y: 267, width: 56, height: 85, anchorX: 0.5, anchorY: 1.0 },
-        { x: 60, y: 268, width: 56, height: 88, anchorX: 0.5, anchorY: 1.0 },
-        { x: 110, y: 267, width: 61, height: 89, anchorX: 0.5, anchorY: 1.0 },
-        { x: 165, y: 268, width: 66, height: 84, anchorX: 0.5, anchorY: 1.0 },
-      ],
-    },
-  },
-};
-
-function normalizeName(name) {
-  if (!name) return "miguel";
-  const lower = name.toLowerCase().trim();
-  if (lower.includes("amélia") || lower.includes("amelia")) return "amelia";
-  if (lower.includes("benjamin")) return "benjamin";
-  if (lower.includes("z")) return "z";
-  return "miguel";
-}
-
-/**
- * Componente de animação 2D com Canvas, deltaTime e âncora nos pés.
+ * Componente modular de Sprite Animado do Geo-Quest.
+ * 
+ * - Personagens com spritesheet (Amelia, Z): renderiza animações via Canvas com deltaTime e pixel art nítida.
+ * - Personagens em refação (Benjamin, Miguel): renderiza o quadrado colorido original com seu badge.
  */
 export default function CharacterAnimatedSprite({
   characterName = "Miguel",
-  action = "idle",
-  scale = 1.6,
+  action = "battleIdle", // "battleIdle" | "mapIdle" | "run" | "attack" | "damage" | "idle"
+  scale = 1.0,
+  flipX = false,
   isDamaged = false,
   useProcedural = true,
+  onAnimationComplete,
   style = {},
 }) {
   const canvasRef = useRef(null);
-  const imageRef = useRef(null);
+  const imagesRef = useRef({});
   const stateRef = useRef({
     currentFrameIndex: 0,
     timer: 0,
-    pingPongDirection: 1,
     lastTime: null,
     proceduralTime: 0,
+    completedAction: null,
   });
 
-  const charKey = normalizeName(characterName);
-  const config = CHARACTER_CONFIGS[charKey] || CHARACTER_CONFIGS.miguel;
-  const currentAnimation = config[action] || config.idle;
+  const charConfig = getCharacterConfig(characterName);
 
-  // Carrega a imagem do sprite sheet
-  useEffect(() => {
-    const img = new Image();
-    img.src = config.sheetUrl;
-    img.onload = () => {
-      imageRef.current = img;
-    };
-  }, [config.sheetUrl]);
+  // Mapeia sinônimos de ações
+  const resolvedAction = (() => {
+    if (action === "idle") {
+      return charConfig.animations?.battleIdle ? "battleIdle" : "mapIdle";
+    }
+    return action;
+  })();
 
-  // Game loop de animação baseado em deltaTime real
+  const animation =
+    charConfig.animations?.[resolvedAction] ||
+    charConfig.animations?.battleIdle ||
+    charConfig.animations?.mapIdle ||
+    null;
+
+  // Carrega as imagens necessárias (spritesheet e/ou idleUrl)
   useEffect(() => {
+    if (!charConfig.hasSprite) return;
+
+    if (charConfig.sheetUrl && !imagesRef.current[charConfig.sheetUrl]) {
+      const img = new Image();
+      img.src = charConfig.sheetUrl;
+      img.onload = () => {
+        imagesRef.current[charConfig.sheetUrl] = img;
+      };
+    }
+
+    if (charConfig.idleUrl && !imagesRef.current[charConfig.idleUrl]) {
+      const imgIdle = new Image();
+      imgIdle.src = charConfig.idleUrl;
+      imgIdle.onload = () => {
+        imagesRef.current[charConfig.idleUrl] = imgIdle;
+      };
+    }
+  }, [charConfig.hasSprite, charConfig.sheetUrl, charConfig.idleUrl]);
+
+  // Reseta o frame ao trocar de ação
+  useEffect(() => {
+    stateRef.current.currentFrameIndex = 0;
+    stateRef.current.timer = 0;
+    stateRef.current.completedAction = null;
+  }, [resolvedAction]);
+
+  // Game loop de animação baseado em requestAnimationFrame e deltaTime
+  useEffect(() => {
+    if (!charConfig.hasSprite || !animation) return;
+
     let animationFrameId;
 
     const render = (timestamp) => {
@@ -115,87 +82,101 @@ export default function CharacterAnimatedSprite({
         stateRef.current.lastTime = timestamp;
       }
 
-      // DeltaTime em segundos (independente de monitor 60Hz, 144Hz, etc.)
-      const deltaTime = Math.min((timestamp - stateRef.current.lastTime) / 1000, 0.1);
+      const deltaTime = Math.min(
+        (timestamp - stateRef.current.lastTime) / 1000,
+        0.1
+      );
       stateRef.current.lastTime = timestamp;
 
-      // 1. Atualiza lógica do Animator
-      const anim = currentAnimation;
-      if (anim && anim.frames.length > 0) {
+      // 1. Atualiza lógica de frames
+      const frames = animation.frames || [];
+      if (frames.length > 0) {
         stateRef.current.timer += deltaTime;
         stateRef.current.proceduralTime += deltaTime;
 
-        while (stateRef.current.timer >= anim.frameDuration) {
-          stateRef.current.timer -= anim.frameDuration;
-
-          if (anim.isPingPong) {
-            let nextIndex = stateRef.current.currentFrameIndex + stateRef.current.pingPongDirection;
-            if (nextIndex >= anim.frames.length) {
-              stateRef.current.pingPongDirection = -1;
-              stateRef.current.currentFrameIndex = Math.max(0, anim.frames.length - 2);
-            } else if (nextIndex < 0) {
-              stateRef.current.pingPongDirection = 1;
-              stateRef.current.currentFrameIndex = Math.min(1, anim.frames.length - 1);
-            } else {
-              stateRef.current.currentFrameIndex = nextIndex;
-            }
+        const duration = animation.frameDuration || 0.15;
+        if (stateRef.current.timer >= duration) {
+          stateRef.current.timer -= duration;
+          if (stateRef.current.currentFrameIndex + 1 < frames.length) {
+            stateRef.current.currentFrameIndex += 1;
+          } else if (animation.loop !== false) {
+            stateRef.current.currentFrameIndex = 0;
           } else {
-            stateRef.current.currentFrameIndex =
-              (stateRef.current.currentFrameIndex + 1) % anim.frames.length;
+            // Animação sem loop completada (ex: ataque ou dano)
+            if (stateRef.current.completedAction !== resolvedAction) {
+              stateRef.current.completedAction = resolvedAction;
+              onAnimationComplete?.();
+            }
           }
         }
       }
 
       // 2. Renderiza no Canvas
       const canvas = canvasRef.current;
-      if (canvas && imageRef.current && anim.frames.length > 0) {
+      const targetImgUrl = animation.useIdleImage
+        ? charConfig.idleUrl
+        : charConfig.sheetUrl;
+      const activeImg = imagesRef.current[targetImgUrl];
+
+      if (canvas && activeImg && frames.length > 0) {
         const ctx = canvas.getContext("2d");
-        const frame = anim.frames[stateRef.current.currentFrameIndex] || anim.frames[0];
+        const frame = frames[stateRef.current.currentFrameIndex] || frames[0];
 
-        // Garante nitidez absoluta da pixel art (sem borrão)
         ctx.imageSmoothingEnabled = false;
-        ctx.mozImageSmoothingEnabled = false;
-        ctx.webkitImageSmoothingEnabled = false;
-        ctx.msImageSmoothingEnabled = false;
-
-        // Limpa o frame anterior
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Ponto do solo na tela (chão fixo perto da base do canvas)
+        // Ponto do solo na tela
         const groundX = canvas.width / 2;
-        const groundY = canvas.height - 12;
+        const groundY = canvas.height - 14;
 
-        // Cálculo procedural (respiração sutil)
-        let scaleX = scale;
-        let scaleY = scale;
+        // Efeito procedural de respiração sutil apenas no idle
+        let scaleX = 1.0;
+        let scaleY = 1.0;
         let offsetY = 0;
 
-        if (useProcedural) {
-          const wave = Math.sin(stateRef.current.proceduralTime * 2.5);
-          scaleY = scale * (1.0 + wave * 0.015);
-          scaleX = scale * (1.0 - wave * 0.008);
-          offsetY = wave * 1.0;
+        const isIdleAction =
+          resolvedAction === "battleIdle" ||
+          resolvedAction === "mapIdle" ||
+          resolvedAction === "idle";
+
+        if (useProcedural && isIdleAction) {
+          const wave = Math.sin(stateRef.current.proceduralTime * 2.6);
+          scaleY = 1.0 + wave * 0.015;
+          scaleX = 1.0 - wave * 0.008;
+          offsetY = wave * 1.2;
         }
 
-        // Âncora nos pés: fixa os sapatos no solo mesmo com frames de alturas distintas
-        const drawX = Math.floor(groundX - frame.width * scaleX * frame.anchorX);
-        const drawY = Math.floor(groundY - frame.height * scaleY * frame.anchorY + offsetY);
-        const drawW = Math.floor(frame.width * scaleX);
-        const drawH = Math.floor(frame.height * scaleY);
+        // Calcula a escala interna de renderização para caber no canvas
+        // Normaliza altura alvo para ~180px na caixa do canvas
+        const targetHeight = 180;
+        const baseNormScale = targetHeight / Math.max(frame.h, 120);
+
+        const drawW = Math.round(frame.w * baseNormScale * scaleX);
+        const drawH = Math.round(frame.h * baseNormScale * scaleY);
 
         ctx.save();
 
-        // Se estiver sob efeito de dano, aplica coloração de flash avermelhado
-        if (isDamaged) {
-          ctx.filter = "brightness(1.4) drop-shadow(0 0 10px rgba(239, 68, 68, 0.8))";
+        if (flipX) {
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
         }
 
+        if (isDamaged) {
+          ctx.filter =
+            "brightness(1.5) drop-shadow(0 0 10px rgba(239, 68, 68, 0.85))";
+        }
+
+        const drawX = Math.round(groundX - drawW * (frame.anchorX ?? 0.5));
+        const drawY = Math.round(
+          groundY - drawH * (frame.anchorY ?? 1.0) + offsetY
+        );
+
         ctx.drawImage(
-          imageRef.current,
+          activeImg,
           frame.x,
           frame.y,
-          frame.width,
-          frame.height,
+          frame.w,
+          frame.h,
           drawX,
           drawY,
           drawW,
@@ -213,7 +194,63 @@ export default function CharacterAnimatedSprite({
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [currentAnimation, scale, isDamaged, useProcedural]);
+  }, [
+    charConfig.hasSprite,
+    charConfig.sheetUrl,
+    charConfig.idleUrl,
+    animation,
+    resolvedAction,
+    flipX,
+    isDamaged,
+    useProcedural,
+    onAnimationComplete,
+  ]);
+
+  // Se o personagem não tiver spritesheet (Miguel ou Benjamin), exibe o quadrado original
+  if (!charConfig.hasSprite) {
+    const size = Math.round(64 * scale);
+    return (
+      <div
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          position: "relative",
+          ...style,
+        }}
+      >
+        <div
+          title={charConfig.shapeLabel}
+          style={{
+            width: size,
+            height: size,
+            background: charConfig.color,
+            border: `3px solid ${isDamaged ? "#EF4444" : charConfig.borderColor}`,
+            boxShadow: isDamaged
+              ? "0 0 20px rgba(239, 68, 68, 0.8)"
+              : `0 0 18px ${charConfig.glow}`,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "'IBM Plex Mono', monospace",
+            fontSize: Math.max(10, Math.round(11 * scale)),
+            fontWeight: 700,
+            color: "#FFFFFF",
+            transform: isDamaged ? "scale(0.92)" : "scale(1)",
+            transition: "transform 0.15s ease",
+          }}
+        >
+          {charConfig.badgeText}
+        </div>
+      </div>
+    );
+  }
+
+  // Personagens com spritesheet (Amelia, Z)
+  const displayW = Math.round(180 * scale);
+  const displayH = Math.round(210 * scale);
 
   return (
     <div
@@ -228,9 +265,11 @@ export default function CharacterAnimatedSprite({
     >
       <canvas
         ref={canvasRef}
-        width={140}
-        height={175}
+        width={240}
+        height={280}
         style={{
+          width: displayW,
+          height: displayH,
           imageRendering: "pixelated",
           display: "block",
           margin: "0 auto",
@@ -239,4 +278,3 @@ export default function CharacterAnimatedSprite({
     </div>
   );
 }
-

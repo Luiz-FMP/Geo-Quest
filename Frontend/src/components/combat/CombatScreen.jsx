@@ -150,7 +150,7 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
       });
 
       setDanoRecebidoAnim(true);
-      setTimeout(() => setDanoRecebidoAnim(false), 300);
+      setTimeout(() => setDanoRecebidoAnim(false), 450);
 
       setHpJogador((hpAtual) => {
         const novoHp = Math.max(0, hpAtual - danoTotalRecebido);
@@ -228,7 +228,7 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
     if (turnoBloqueado) return;
     setTurnoBloqueado(true);
     setAnimacaoJogador(true);
-    setTimeout(() => setAnimacaoJogador(false), 250);
+    setTimeout(() => setAnimacaoJogador(false), 450);
 
     const alvo = inimigos[alvoIndex] || inimigos[0];
     const dano = calcularDano(personagem.ataque, alvo.defesa);
@@ -247,7 +247,7 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
     setTurnoBloqueado(true);
     setEnergiaJogador((e) => e - 20);
     setAnimacaoJogador(true);
-    setTimeout(() => setAnimacaoJogador(false), 250);
+    setTimeout(() => setAnimacaoJogador(false), 450);
 
     const isArea =
       personagem.nome === "Z" || (personagem.vantagem || "").toLowerCase().includes("área");
@@ -347,6 +347,7 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
       {/* ARENA VISUAL (METADE SUPERIOR) */}
       <CombatArena
         personagem={personagem}
+        tipoCombate={sessaoCombate.tipoCombate}
         hpJogador={hpJogador}
         energiaJogador={energiaJogador}
         defendendo={defendendo}

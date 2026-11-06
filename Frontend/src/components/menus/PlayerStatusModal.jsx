@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getCharacterPlaceholder } from "../../config/placeholderAssets";
+import { getCharacterConfig } from "../../config/characterAssets";
 import CharacterSelectScreen from "../CharacterSelectScreen";
 import { FullScreenMenuCloseButton } from "../PlayerBottomMenu";
 
@@ -447,23 +448,35 @@ export default function PlayerStatusModal({
                   <div
                     title={charVisual.shapeLabel}
                     style={{
-                      width: 54,
-                      height: 54,
-                      background: charVisual.color,
-                      border: `3px solid ${charVisual.borderColor}`,
+                      width: 58,
+                      height: 58,
+                      background: "#101612",
+                      border: `2px solid ${charVisual.borderColor || "#C89B5C"}`,
                       boxShadow: `0 0 14px ${charVisual.glow}`,
-                      borderRadius: 6,
+                      borderRadius: 8,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontFamily: "'IBM Plex Mono', monospace",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#FFFFFF",
                       flexShrink: 0,
+                      overflow: "hidden",
                     }}
                   >
-                    {charVisual.badgeText}
+                    <img
+                      src={getCharacterConfig(personagemAtual.nome || personagemAtual.id).icon}
+                      alt={personagemAtual.nome}
+                      style={{
+                        width: 50,
+                        height: 50,
+                        objectFit: "contain",
+                        imageRendering: "pixelated",
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        if (e.currentTarget.parentNode) {
+                          e.currentTarget.parentNode.style.background = charVisual.color;
+                        }
+                      }}
+                    />
                   </div>
                   <div>
                     <span

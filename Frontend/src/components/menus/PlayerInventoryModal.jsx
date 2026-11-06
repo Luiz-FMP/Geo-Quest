@@ -1,10 +1,10 @@
 import { useState } from "react";
 import {
   EQUIPMENT_SLOT_PLACEHOLDERS,
-  getCharacterPlaceholder,
   getItemPlaceholder,
   getRarityVisual,
 } from "../../config/placeholderAssets";
+import CharacterAnimatedSprite from "../combat/CharacterAnimatedSprite";
 import { FullScreenMenuCloseButton } from "../PlayerBottomMenu";
 
 const TOTAL_BACKPACK_SLOTS = 50; // 5 x 10
@@ -40,13 +40,9 @@ export default function PlayerInventoryModal({
 
   const personagemAtual = playerState?.personagemAtual || {
     id: playerState?.personagemId || 1,
-    nome: "Explorador #1",
+    nome: "Miguel",
     placeholderKey: "char_1",
   };
-
-  const charVisual = getCharacterPlaceholder(
-    personagemAtual.placeholderKey || personagemAtual.id,
-  );
 
   const mochilaItems = Array.isArray(playerState?.mochila)
     ? playerState.mochila
@@ -413,7 +409,7 @@ export default function PlayerInventoryModal({
                 )}
               </div>
 
-              {/* Placeholder Visual Central do Personagem */}
+              {/* Visual Central do Personagem (Sprite Animado ou Quadrado Clássico) */}
               <div
                 style={{
                   background: "#121814",
@@ -429,24 +425,19 @@ export default function PlayerInventoryModal({
                 }}
               >
                 <div
-                  title={charVisual.shapeLabel}
                   style={{
-                    width: 84,
-                    height: 84,
-                    background: charVisual.color,
-                    border: `4px solid ${charVisual.borderColor}`,
-                    boxShadow: `0 0 24px ${charVisual.glow}`,
-                    borderRadius: 10,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontFamily: "'IBM Plex Mono', monospace",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: "#FFFFFF",
+                    minHeight: 120,
                   }}
                 >
-                  {charVisual.badgeText}
+                  <CharacterAnimatedSprite
+                    characterName={personagemAtual.nome}
+                    action="mapIdle"
+                    scale={1.05}
+                    useProcedural={true}
+                  />
                 </div>
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#EDE6D3" }}>
@@ -456,11 +447,11 @@ export default function PlayerInventoryModal({
                     style={{
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontSize: 10,
-                      color: "#8A9A8C",
+                      color: "#C89B5C",
                       marginTop: 3,
                     }}
                   >
-                    Placeholder de Sprite
+                    {personagemAtual.descricao || "Personagem Ativo"}
                   </div>
                 </div>
               </div>

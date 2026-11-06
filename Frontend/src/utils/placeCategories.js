@@ -399,7 +399,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.FOOD_AND_DRINK,
     key: "food_and_drink",
-    color: "#F59E0B",
+    color: "#EAB308",
     placeFunction: PLACE_FUNCTIONS.SHOP,
     interactionHint: "Loja de consumíveis. Confira os espaços de produtos e seu inventário de consumíveis.",
     actionLabel: "LOJA",
@@ -423,7 +423,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.HEALTH_AND_WELLNESS,
     key: "health_and_wellness",
-    color: "#10B981",
+    color: "#4ADE80",
     placeFunction: PLACE_FUNCTIONS.HOSPITAL,
     interactionHint: "Este local permite recuperar sua Vida e funciona como checkpoint caso você seja derrotado.",
     actionLabel: "CURAR",
@@ -436,7 +436,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.SHOPPING,
     key: "shopping",
-    color: "#06B6D4",
+    color: "#F97316",
     placeFunction: PLACE_FUNCTIONS.SHOP,
     interactionHint: "Loja de equipamentos. Confira os espaços de produtos e seu inventário de equipamentos.",
     actionLabel: "LOJA",
@@ -453,7 +453,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.SPORTS,
     key: "sports",
-    color: "#8B5CF6",
+    color: "#A855F7",
     placeFunction: PLACE_FUNCTIONS.SPORTS,
     interactionHint: "Local esportivo que permite escolher uma melhoria permanente de atributo.",
     actionLabel: "TREINAR",
@@ -467,7 +467,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.NATURAL_FEATURES,
     key: "natural_features",
-    color: "#22C55E",
+    color: "#15803D",
     placeFunction: PLACE_FUNCTIONS.EXPLORATION,
     interactionHint: "Vasculhe o local em busca de descobertas deixadas pela natureza.",
     actionLabel: "VASCULHAR LOCAL",
@@ -479,7 +479,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.LODGING,
     key: "lodging",
-    color: "#EAB308",
+    color: "#92400E",
     placeFunction: PLACE_FUNCTIONS.LODGING,
     interactionHint: "Este local permite recuperar sua Energia e funciona como checkpoint caso você fique exausto.",
     actionLabel: "DESCANSAR",
@@ -502,7 +502,7 @@ export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.SERVICES,
     key: "services",
-    color: "#A855F7",
+    color: "#94A3B8",
     placeFunction: PLACE_FUNCTIONS.SHOP,
     interactionHint: "Estabelecimento de serviços que oferece um aprimoramento temporário por 50g.",
     actionLabel: "COMPRAR BUFF (50g)",

@@ -1,7 +1,19 @@
 import CharacterAnimatedSprite from "./CharacterAnimatedSprite";
 
+function getBattleMapImage(tipoCombate) {
+  const tipo = String(tipoCombate || "").toLowerCase();
+  if (tipo.includes("arena")) {
+    return "/battle_maps/park_battle_map.png";
+  }
+  if (tipo.includes("boss")) {
+    return "/battle_maps/mall_battle_map.png";
+  }
+  return "/battle_maps/random_battle_map.png";
+}
+
 export default function CombatArena({
   personagem,
+  tipoCombate = "Emboscada",
   hpJogador,
   energiaJogador,
   defendendo,
@@ -13,6 +25,13 @@ export default function CombatArena({
 }) {
   const hpMaxJogador = personagem.vida || 50;
   const peMaxJogador = personagem.energia || 100;
+  const battleMapUrl = getBattleMapImage(tipoCombate);
+
+  const playerAction = danoRecebidoAnim
+    ? "damage"
+    : animacaoJogador
+      ? "attack"
+      : "battleIdle";
 
   return (
     <div
@@ -20,38 +39,50 @@ export default function CombatArena({
         flex: 1,
         display: "flex",
         justifyContent: "space-between",
-        alignItems: "center",
-        padding: "0 8%",
+        alignItems: "flex-end",
+        padding: "0 6% 36px 6%",
         position: "relative",
         overflow: "hidden",
-        background: "radial-gradient(circle at 50% 40%, #1B2820 0%, #0D130F 75%)",
+        backgroundColor: "#0D130F",
       }}
     >
-      {/* Grelha Tática de Fundo (Estilo Deltarune adaptado ao tema Geo-Quest) */}
+      {/* Imagem de Fundo Dinâmica por Tipo de Combate */}
       <div
         style={{
           position: "absolute",
           inset: 0,
-          backgroundImage: `
-            linear-gradient(to right, rgba(200, 155, 92, 0.06) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(200, 155, 92, 0.06) 1px, transparent 1px)
-          `,
-          backgroundSize: "48px 48px",
-          pointerEvents: "none",
+          backgroundImage: `url(${battleMapUrl})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center bottom",
+          filter: "brightness(0.9)",
+          zIndex: 0,
         }}
       />
 
-      {/* Linha de Solo da Arena */}
+      {/* Vinheta atmosférica para contraste com sprites e HUD */}
       <div
         style={{
           position: "absolute",
-          bottom: "18%",
-          left: "5%",
-          right: "5%",
+          inset: 0,
+          background:
+            "radial-gradient(ellipse at 50% 60%, rgba(13, 19, 15, 0.12) 0%, rgba(13, 19, 15, 0.58) 100%)",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
+
+      {/* Linha tática de profundidade do piso */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: "16%",
+          left: "4%",
+          right: "4%",
           height: 1,
           background:
-            "linear-gradient(90deg, transparent 0%, rgba(200, 155, 92, 0.35) 50%, transparent 100%)",
+            "linear-gradient(90deg, transparent 0%, rgba(200, 155, 92, 0.25) 50%, transparent 100%)",
           pointerEvents: "none",
+          zIndex: 1,
         }}
       />
 
@@ -63,11 +94,11 @@ export default function CombatArena({
           transform: animacaoJogador
             ? "translateX(55px) scale(1.05)"
             : danoRecebidoAnim
-              ? "translateX(-12px)"
+              ? "translateX(-14px)"
               : "translateX(0)",
-          transition: "transform 0.2s cubic-bezier(0.22, 1, 0.36, 1)",
+          transition: "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)",
           textAlign: "center",
-          minWidth: 160,
+          minWidth: 170,
         }}
       >
         {/* Indicador de Postura Defensiva */}
@@ -76,7 +107,7 @@ export default function CombatArena({
             style={{
               marginBottom: 8,
               display: "inline-block",
-              padding: "3px 8px",
+              padding: "4px 10px",
               borderRadius: 4,
               background: "#13293D",
               border: "1px solid #38BDF8",
@@ -84,48 +115,67 @@ export default function CombatArena({
               fontSize: 10,
               fontWeight: 700,
               letterSpacing: "0.06em",
+              boxShadow: "0 0 10px rgba(56, 189, 248, 0.4)",
             }}
           >
             🛡️ ESCUDO ATIVO (-50% DANO)
           </div>
         )}
 
-        {/* Sprite Animado do Personagem com Sistema de Idle, Ping-Pong e DeltaTime */}
+        {/* Sprite Animado do Personagem */}
         <div
           style={{
             display: "flex",
             justifyContent: "center",
-            alignItems: "center",
-            margin: "0 auto -6px auto",
+            alignItems: "flex-end",
+            margin: "0 auto -4px auto",
             position: "relative",
           }}
         >
           <CharacterAnimatedSprite
             characterName={personagem.nome}
-            action="idle"
-            scale={1.65}
+            action={playerAction}
+            scale={1.35}
             isDamaged={Boolean(danoRecebidoAnim)}
             useProcedural={true}
           />
         </div>
-        {/* Sombra no chão */}
+
+        {/* Sombra suave nos pés */}
         <div
           style={{
-            width: 90,
-            height: 12,
-            background: "rgba(0, 0, 0, 0.55)",
+            width: 100,
+            height: 14,
+            background: "rgba(0, 0, 0, 0.65)",
             borderRadius: "50%",
-            margin: "-4px auto 10px auto",
-            filter: "blur(2px)",
+            margin: "-6px auto 10px auto",
+            filter: "blur(3px)",
           }}
         />
 
-        <div style={{ fontWeight: 700, fontSize: 16, color: "#EDE6D3" }}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 16,
+            color: "#EDE6D3",
+            textShadow: "0 2px 4px rgba(0,0,0,0.8)",
+          }}
+        >
           {personagem.nome}
         </div>
 
         {/* Barras Compactas sob o Jogador */}
-        <div style={{ width: 140, margin: "8px auto 0 auto" }}>
+        <div
+          style={{
+            width: 145,
+            margin: "8px auto 0 auto",
+            background: "rgba(13, 19, 15, 0.75)",
+            padding: "6px 8px",
+            borderRadius: 6,
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
           <div
             style={{
               display: "flex",
@@ -201,7 +251,7 @@ export default function CombatArena({
           position: "relative",
           zIndex: 2,
           display: "flex",
-          gap: 22,
+          gap: 20,
           alignItems: "flex-end",
           flexWrap: "wrap",
           justifyContent: "flex-end",
@@ -226,11 +276,14 @@ export default function CombatArena({
               : "#20142B";
 
           const tamanhoCaixa = isBoss ? 132 : isMiniBoss ? 108 : 90;
-          const pctVida = Math.max(0, Math.min(100, (ini.vidaAtual / ini.vidaMaxima) * 100));
+          const pctVida = Math.max(
+            0,
+            Math.min(100, (ini.vidaAtual / ini.vidaMaxima) * 100)
+          );
 
           return (
             <div
-              key={ini.instanciaId}
+              key={ini.instanciaId || idx}
               onClick={() => onSelectAlvo(idx)}
               style={{
                 cursor: "pointer",
@@ -239,10 +292,11 @@ export default function CombatArena({
                 borderRadius: 12,
                 border: selecionado
                   ? "2px solid #C89B5C"
-                  : "2px solid rgba(255, 255, 255, 0.05)",
+                  : "2px solid rgba(255, 255, 255, 0.12)",
                 background: selecionado
-                  ? "rgba(200, 155, 92, 0.14)"
-                  : "rgba(13, 19, 15, 0.45)",
+                  ? "rgba(200, 155, 92, 0.22)"
+                  : "rgba(13, 19, 15, 0.72)",
+                backdropFilter: "blur(5px)",
                 transform: selecionado ? "translateY(-6px)" : "translateY(0)",
                 transition: "all 0.18s ease",
                 position: "relative",
@@ -299,7 +353,7 @@ export default function CombatArena({
                 style={{
                   width: tamanhoCaixa * 0.75,
                   height: 10,
-                  background: "rgba(0, 0, 0, 0.55)",
+                  background: "rgba(0, 0, 0, 0.65)",
                   borderRadius: "50%",
                   margin: "-2px auto 8px auto",
                   filter: "blur(2px)",
@@ -317,6 +371,7 @@ export default function CombatArena({
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   margin: "0 auto",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.8)",
                 }}
               >
                 {ini.nome}
