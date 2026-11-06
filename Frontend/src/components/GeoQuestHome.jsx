@@ -3,6 +3,7 @@ import {
   alterarPersonagemJogador,
   atualizarNomeJogador,
   atualizarVidaJogador,
+  comprarBuffServicesJogador,
   concluirCombateLocalJogador,
   curarEmHospitalJogador,
   definirHomeJogador,
@@ -14,10 +15,13 @@ import {
   gerarItemDebugInventario,
   getDebugCoordinatesConfig,
   moverItemInventario,
+  receberAprimoramentoCultureJogador,
   registrarPercursoJogador,
   registrarVisitaPlaceJogador,
   removerItemInventario,
   retornarParaCheckpointJogador,
+  sincronizarBuffsJogador,
+  sortearOuObterAtributoServicesJogador,
   treinarSportsJogador,
   validateDebugCoordinates,
   vasculharNaturalFeatureJogador,
@@ -210,6 +214,58 @@ export default function GeoQuestHome() {
       setPlayerState(response.jogador);
     }
     return response;
+  }, []);
+
+  const handleEnsureServicesAttribute = useCallback(async (place) => {
+    if (!place || !place.id) return null;
+    const response = await sortearOuObterAtributoServicesJogador({
+      placeId: place.id,
+      nome: place.name,
+      subcategoria: place.subcategory || "bank",
+      latitude: place.lat,
+      longitude: place.lng,
+    });
+    if (response?.jogador) {
+      setPlayerState(response.jogador);
+    }
+    return response;
+  }, []);
+
+  const handleBuyServicesBuff = useCallback(async (place) => {
+    const response = await comprarBuffServicesJogador({
+      placeId: place.id,
+      nome: place.name,
+      subcategoria: place.subcategory || "bank",
+      latitude: place.lat,
+      longitude: place.lng,
+    });
+    if (response?.jogador) {
+      setPlayerState(response.jogador);
+    }
+    return response;
+  }, []);
+
+  const handleReceiveCultureBuff = useCallback(async (place, interacaoId) => {
+    const response = await receberAprimoramentoCultureJogador({
+      placeId: place.id,
+      nome: place.name,
+      subcategoria: place.subcategory || "museum",
+      latitude: place.lat,
+      longitude: place.lng,
+      interacaoId,
+    });
+    if (response?.jogador) {
+      setPlayerState(response.jogador);
+    }
+    return response;
+  }, []);
+
+  const handleSyncBuffs = useCallback(async () => {
+    const updated = await sincronizarBuffsJogador();
+    if (updated) {
+      setPlayerState(updated);
+    }
+    return updated;
   }, []);
 
   const handleTravelTransport = useCallback(
@@ -428,6 +484,10 @@ export default function GeoQuestHome() {
           onHomeRest={handleHomeRest}
           onExploreNaturalFeature={handleExploreNaturalFeature}
           onTrainSports={handleTrainSports}
+          onEnsureServicesAttribute={handleEnsureServicesAttribute}
+          onBuyServicesBuff={handleBuyServicesBuff}
+          onReceiveCultureBuff={handleReceiveCultureBuff}
+          onSyncBuffs={handleSyncBuffs}
           onTravelTransport={handleTravelTransport}
           onTransportModeChange={setIsTransportMapOpen}
           onCompleteCombatPlace={handleCompleteCombatPlace}

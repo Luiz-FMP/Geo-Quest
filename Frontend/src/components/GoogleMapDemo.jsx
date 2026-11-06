@@ -23,6 +23,7 @@ import {
   normalizePlaceRecord,
   resolveTransportationSubcategory,
 } from "../utils/placeCategories";
+import ActiveBuffsBar from "./ActiveBuffsBar";
 import CombatScreen from "./combat/CombatScreen";
 import PlaceArrivalModal from "./PlaceArrivalModal";
 import PlaceShopModal from "./PlaceShopModal";
@@ -356,6 +357,10 @@ function GameMapContent({
   onHomeRest,
   onExploreNaturalFeature,
   onTrainSports,
+  onEnsureServicesAttribute,
+  onBuyServicesBuff,
+  onReceiveCultureBuff,
+  onSyncBuffs,
   onTravelTransport,
   onTransportModeChange,
   onCompleteCombatPlace,
@@ -2280,13 +2285,33 @@ function GameMapContent({
           </div>
         </header>
 
+        {/* Seção 3: Ícones de aprimoramentos (buffs) temporários ativos no topo à esquerda, logo abaixo da barra de status */}
+        {Array.isArray(playerState?.buffs) && playerState.buffs.length > 0 && (
+          <div
+            data-testid="map-buffs-overlay"
+            style={{
+              position: "absolute",
+              top: 84,
+              left: 12,
+              zIndex: 15,
+              pointerEvents: "auto",
+            }}
+          >
+            <ActiveBuffsBar
+              buffs={playerState.buffs}
+              compact={false}
+              onBuffExpired={onSyncBuffs}
+            />
+          </div>
+        )}
+
         {/* Banner identificador do Modo Alternativo de Transporte (Seção 5.2) */}
         {isTransportModeActive && (
           <div
             data-testid="transport-mode-banner"
             style={{
               position: "absolute",
-              top: 86,
+              top: Array.isArray(playerState?.buffs) && playerState.buffs.length > 0 ? 154 : 86,
               left: 12,
               maxWidth: 520,
               background: "rgba(15, 34, 61, 0.94)",
@@ -2321,7 +2346,7 @@ function GameMapContent({
             <div
               style={{
                 position: "absolute",
-                top: 86,
+                top: Array.isArray(playerState?.buffs) && playerState.buffs.length > 0 ? 154 : 86,
                 left: 12,
                 maxWidth: 440,
                 background:
@@ -2776,6 +2801,9 @@ function GameMapContent({
           onExploreNaturalFeature={onExploreNaturalFeature}
           onOpenTransportMap={handleOpenTransportMap}
           onTrainSports={onTrainSports}
+          onEnsureServicesAttribute={onEnsureServicesAttribute}
+          onBuyServicesBuff={onBuyServicesBuff}
+          onReceiveCultureBuff={onReceiveCultureBuff}
           onClose={() => setArrivedPlace(null)}
         />
       )}
@@ -3057,6 +3085,8 @@ function GameMapContent({
             defesa: playerState?.atributos?.defesaFinal ?? 0,
             velocidade: (playerState?.atributos?.velocidadeFinal ?? 0) + 12,
           }}
+          buffs={playerState?.buffs || []}
+          onBuffExpired={onSyncBuffs}
           sessaoCombate={activeCombatSession}
           onFinishCombat={handleFinishCombat}
         />
@@ -3078,6 +3108,10 @@ export default function GoogleMapDemo({
   onHomeRest,
   onExploreNaturalFeature,
   onTrainSports,
+  onEnsureServicesAttribute,
+  onBuyServicesBuff,
+  onReceiveCultureBuff,
+  onSyncBuffs,
   onTravelTransport,
   onTransportModeChange,
   onCompleteCombatPlace,
@@ -3193,6 +3227,10 @@ export default function GoogleMapDemo({
         onHomeRest={onHomeRest}
         onExploreNaturalFeature={onExploreNaturalFeature}
         onTrainSports={onTrainSports}
+        onEnsureServicesAttribute={onEnsureServicesAttribute}
+        onBuyServicesBuff={onBuyServicesBuff}
+        onReceiveCultureBuff={onReceiveCultureBuff}
+        onSyncBuffs={onSyncBuffs}
         onTravelTransport={onTravelTransport}
         onTransportModeChange={onTransportModeChange}
         onCompleteCombatPlace={onCompleteCombatPlace}

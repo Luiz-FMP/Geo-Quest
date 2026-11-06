@@ -207,7 +207,193 @@ function createDebugItemInstance(inventarioId = 1, slotIndice = 0) {
   };
 }
 
-function recalculateState(state) {
+export const CUSTO_MOEDAS_BUFF_SERVICES = 50;
+export const DURACAO_SEGUNDOS_BUFF_SERVICES = 600; // 10 minutos
+export const DURACAO_SEGUNDOS_BUFF_CULTURE = 300; // 5 minutos
+
+/**
+ * Seção 4: Probabilidades de sorteio do atributo para Services:
+ * - Vida (+15): 25% [0.00, 0.25)
+ * - Energia (+20): 25% [0.25, 0.50)
+ * - Dano (+4): 15% [0.50, 0.65)
+ * - Defesa (+4): 15% [0.65, 0.80)
+ * - Velocidade (+4): 20% [0.80, 1.00)
+ */
+export function sortearAtributoServices(roll = Math.random()) {
+  const safeRoll = Number.isFinite(Number(roll)) ? Number(roll) : 0;
+  if (safeRoll < 0.25) return "vida";
+  if (safeRoll < 0.5) return "energia";
+  if (safeRoll < 0.65) return "dano";
+  if (safeRoll < 0.8) return "defesa";
+  return "velocidade";
+}
+
+/**
+ * Seção 5: Probabilidades de sorteio do aprimoramento em Culture:
+ * - Vida (+20): 20% [0.00, 0.20)
+ * - Energia (+40): 20% [0.20, 0.40)
+ * - Dano (+6): 15% [0.40, 0.55)
+ * - Defesa (+6): 15% [0.55, 0.70)
+ * - Velocidade (+6): 20% [0.70, 0.90)
+ * - Nenhum Aprimoramento: 10% [0.90, 1.00)
+ */
+export function sortearResultadoCulture(roll = Math.random()) {
+  const safeRoll = Number.isFinite(Number(roll)) ? Number(roll) : 0;
+  if (safeRoll < 0.2) return "vida";
+  if (safeRoll < 0.4) return "energia";
+  if (safeRoll < 0.55) return "dano";
+  if (safeRoll < 0.7) return "defesa";
+  if (safeRoll < 0.9) return "velocidade";
+  return "nada";
+}
+
+export function obterEspecificacaoBuff(atributo, origem = "services") {
+  const normAttr = String(atributo || "").trim().toLowerCase();
+  const isCulture = String(origem || "").trim().toLowerCase() === "culture";
+  const duracaoMin = isCulture ? 5 : 10;
+
+  switch (normAttr) {
+    case "vida": {
+      const bonus = isCulture ? 20 : 15;
+      return {
+        atributo: "vida",
+        rotuloAtributo: "Vida",
+        bonus,
+        nomeBuff: "Aprimoramento de Vida",
+        descricaoBuff: `+${bonus} de Vida temporária (${duracaoMin} min).`,
+        placeholderKey: "buff_vida",
+      };
+    }
+    case "energia": {
+      const bonus = isCulture ? 40 : 20;
+      return {
+        atributo: "energia",
+        rotuloAtributo: "Energia",
+        bonus,
+        nomeBuff: "Aprimoramento de Energia",
+        descricaoBuff: `+${bonus} de Energia temporária (${duracaoMin} min).`,
+        placeholderKey: "buff_energia",
+      };
+    }
+    case "dano": {
+      const bonus = isCulture ? 6 : 4;
+      return {
+        atributo: "dano",
+        rotuloAtributo: "Dano",
+        bonus,
+        nomeBuff: "Aprimoramento de Dano",
+        descricaoBuff: `+${bonus} de Dano temporário (${duracaoMin} min).`,
+        placeholderKey: "buff_dano",
+      };
+    }
+    case "defesa": {
+      const bonus = isCulture ? 6 : 4;
+      return {
+        atributo: "defesa",
+        rotuloAtributo: "Defesa",
+        bonus,
+        nomeBuff: "Aprimoramento de Defesa",
+        descricaoBuff: `+${bonus} de Defesa temporária (${duracaoMin} min).`,
+        placeholderKey: "buff_defesa",
+      };
+    }
+    case "velocidade": {
+      const bonus = isCulture ? 6 : 4;
+      return {
+        atributo: "velocidade",
+        rotuloAtributo: "Velocidade",
+        bonus,
+        nomeBuff: "Aprimoramento de Velocidade",
+        descricaoBuff: `+${bonus} de Velocidade temporária (${duracaoMin} min).`,
+        placeholderKey: "buff_velocidade",
+      };
+    }
+    default:
+      return {
+        atributo: "nada",
+        rotuloAtributo: "Nada",
+        bonus: 0,
+        nomeBuff: "Nada",
+        descricaoBuff: "Nenhum aprimoramento adquirido.",
+        placeholderKey: "buff_nada",
+      };
+  }
+}
+
+export function identificarAtributoBuff(buff) {
+  if (!buff || typeof buff !== "object") return "desconhecido";
+  if ((Number(buff.bonusVida) || 0) !== 0) return "vida";
+  if ((Number(buff.bonusEnergia) || 0) !== 0) return "energia";
+  if ((Number(buff.bonusDano) || 0) !== 0) return "dano";
+  if ((Number(buff.bonusDefesa) || 0) !== 0) return "defesa";
+  if ((Number(buff.bonusVelocidade) || 0) !== 0) return "velocidade";
+
+  const key = String(buff.placeholderKey || "").trim().toLowerCase();
+  if (key.startsWith("buff_")) {
+    return key.slice(5);
+  }
+  return "desconhecido";
+}
+
+/**
+ * Converte o instante de expiração (UTC) de um buff em milissegundos.
+ * Timestamps sem indicador de fuso (ex.: "2026-11-06T01:42:00" vindo do SQLite)
+ * são tratados como UTC — caso contrário o navegador os interpretaria como horário
+ * local, deslocando o contador pelo offset do fuso (ex.: +180 min em UTC-3).
+ */
+export function obterExpiracaoBuffMs(expiraEmUtc) {
+  if (expiraEmUtc === null || expiraEmUtc === undefined || expiraEmUtc === "") {
+    return NaN;
+  }
+  if (expiraEmUtc instanceof Date) return expiraEmUtc.getTime();
+  if (typeof expiraEmUtc === "number") return expiraEmUtc;
+  const raw = String(expiraEmUtc).trim();
+  const hasTimezone = /(Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  return new Date(hasTimezone ? raw : `${raw}Z`).getTime();
+}
+
+export function calcularSegundosRestantesBuff(buff, nowMs = Date.now()) {
+  if (!buff || !buff.ativo) return 0;
+  if (!buff.expiraEmUtc) {
+    return 999999;
+  }
+  const expMs = obterExpiracaoBuffMs(buff.expiraEmUtc);
+  if (!Number.isFinite(expMs)) return 0;
+  const diffSec = Math.ceil((expMs - nowMs) / 1000);
+  return Math.max(0, diffSec);
+}
+
+export function formatarContadorBuff(segundosRestantes) {
+  const safeSec = Math.max(0, Math.floor(Number(segundosRestantes) || 0));
+  const min = Math.floor(safeSec / 60);
+  const sec = safeSec % 60;
+  return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+export function filtrarBuffsAtivosUnicosPorAtributo(buffs, nowMs = Date.now()) {
+  if (!Array.isArray(buffs) || buffs.length === 0) return [];
+  const validos = buffs.filter((b) => {
+    if (!b || !b.ativo) return false;
+    if (!b.expiraEmUtc) return true;
+    const expMs = obterExpiracaoBuffMs(b.expiraEmUtc);
+    return Number.isFinite(expMs) && expMs > nowMs;
+  });
+
+  // Ordena por id (ordem de aquisição) e sobrescreve caso haja mais de um para o mesmo atributo
+  const ordenados = [...validos].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  const resultado = [];
+  for (const buff of ordenados) {
+    const attr = identificarAtributoBuff(buff);
+    const idxExistente = resultado.findIndex((x) => identificarAtributoBuff(x) === attr);
+    if (idxExistente >= 0) {
+      resultado.splice(idxExistente, 1);
+    }
+    resultado.push(buff);
+  }
+  return resultado;
+}
+
+export function recalculateState(state, nowMs = Date.now()) {
   const vidaBase = state.atributos?.vidaBase ?? 50;
   const energiaBase = state.atributos?.energiaBase ?? 100;
   const danoBase = state.atributos?.danoBase ?? 10;
@@ -218,7 +404,7 @@ function recalculateState(state) {
   const equippedItems = (state.equipamentos || [])
     .map((s) => s.itemEquipado)
     .filter(Boolean);
-  const activeBuffs = (state.buffs || []).filter((b) => b.ativo);
+  const activeBuffs = filtrarBuffsAtivosUnicosPorAtributo(state.buffs || [], nowMs);
 
   const vidaMod =
     equippedItems.reduce((acc, i) => acc + (i.bonusVida || 0), 0) +
@@ -265,6 +451,7 @@ function recalculateState(state) {
   return {
     ...state,
     moedas,
+    buffs: activeBuffs,
     home: state.home || null,
     checkpointVida: state.checkpointVida || null,
     checkpointEnergia: state.checkpointEnergia || null,
@@ -386,6 +573,23 @@ function upsertLocalPlaceVisitAndState(
   const nowIso = new Date().toISOString();
   let estado = local.estadosPlaces.find((e) => e.placeId === placeId);
   if (!estado) {
+    let defaultEstoqueJson = null;
+    if (estoqueJson !== undefined) {
+      defaultEstoqueJson = estoqueJson;
+    } else if (categoria === "Shopping" && subcategoria !== "shopping_mall") {
+      defaultEstoqueJson = '{"slots":10,"reabastecimento":false}';
+    } else if (categoria === "Services") {
+      const attr = sortearAtributoServices(Math.random());
+      const spec = obterEspecificacaoBuff(attr, "services");
+      defaultEstoqueJson = JSON.stringify({
+        atributo: spec.atributo,
+        rotuloAtributo: spec.rotuloAtributo,
+        bonus: spec.bonus,
+        duracaoSegundos: DURACAO_SEGUNDOS_BUFF_SERVICES,
+        custoMoedas: CUSTO_MOEDAS_BUFF_SERVICES,
+      });
+    }
+
     estado = {
       placeId,
       nome: nome || "Local",
@@ -397,12 +601,7 @@ function upsertLocalPlaceVisitAndState(
       curaGratuitaUtilizada: false,
       lojaEsgotada: false,
       estadoInteracao: estadoInteracao || "Visitado",
-      estoqueJson:
-        estoqueJson !== undefined
-          ? estoqueJson
-          : categoria === "Shopping" && subcategoria !== "shopping_mall"
-            ? '{"slots":10,"reabastecimento":false}'
-            : null,
+      estoqueJson: defaultEstoqueJson,
       ultimaAtualizacaoUtc: nowIso,
     };
     local.estadosPlaces.push(estado);
@@ -419,6 +618,19 @@ function upsertLocalPlaceVisitAndState(
     }
     if (estoqueJson !== undefined) {
       estado.estoqueJson = estoqueJson;
+    } else if (
+      (estado.categoria === "Services" || categoria === "Services") &&
+      !estado.estoqueJson
+    ) {
+      const attr = sortearAtributoServices(Math.random());
+      const spec = obterEspecificacaoBuff(attr, "services");
+      estado.estoqueJson = JSON.stringify({
+        atributo: spec.atributo,
+        rotuloAtributo: spec.rotuloAtributo,
+        bonus: spec.bonus,
+        duracaoSegundos: DURACAO_SEGUNDOS_BUFF_SERVICES,
+        custoMoedas: CUSTO_MOEDAS_BUFF_SERVICES,
+      });
     }
     estado.ultimaAtualizacaoUtc = nowIso;
   }
@@ -1681,3 +1893,335 @@ export async function treinarSportsJogador({
     };
   }
 }
+
+function extrairAtributoPersistidoServices(estoqueJson) {
+  if (!estoqueJson) return null;
+  try {
+    const parsed = typeof estoqueJson === "string" ? JSON.parse(estoqueJson) : estoqueJson;
+    const attr = String(parsed?.atributo || "").trim().toLowerCase();
+    if (["vida", "energia", "dano", "defesa", "velocidade"].includes(attr)) {
+      return attr;
+    }
+  } catch {
+    // Ignora JSON inválido
+  }
+  return null;
+}
+
+function aplicarOuSobrescreverBuffLocal(local, spec, duracaoSegundos) {
+  if (!Array.isArray(local.buffs)) {
+    local.buffs = [];
+  }
+  const nowMs = Date.now();
+  // Remove buffs expirados e qualquer buff anterior do mesmo atributo (Seção 3: sobrescreve mesmo atributo)
+  local.buffs = local.buffs.filter((b) => {
+    if (!b || !b.ativo) return false;
+    if (b.expiraEmUtc) {
+      const expMs = obterExpiracaoBuffMs(b.expiraEmUtc);
+      if (!Number.isFinite(expMs) || expMs <= nowMs) return false;
+    }
+    return identificarAtributoBuff(b) !== spec.atributo;
+  });
+
+  const nextId =
+    local.buffs.reduce((max, b) => Math.max(max, Number(b.id) || 0), 0) + 1;
+  const expiraEmUtc = new Date(nowMs + duracaoSegundos * 1000).toISOString();
+
+  const novoBuff = {
+    id: nextId,
+    nome: spec.nomeBuff,
+    descricao: spec.descricaoBuff,
+    bonusVida: spec.atributo === "vida" ? spec.bonus : 0,
+    bonusEnergia: spec.atributo === "energia" ? spec.bonus : 0,
+    bonusDano: spec.atributo === "dano" ? spec.bonus : 0,
+    bonusDefesa: spec.atributo === "defesa" ? spec.bonus : 0,
+    bonusVelocidade: spec.atributo === "velocidade" ? spec.bonus : 0,
+    ativo: true,
+    expiraEmUtc,
+    placeholderKey: spec.placeholderKey,
+  };
+
+  local.buffs.push(novoBuff);
+  return novoBuff;
+}
+
+export async function sortearOuObterAtributoServicesJogador({
+  placeId,
+  nome,
+  subcategoria = "bank",
+  latitude = 0,
+  longitude = 0,
+}) {
+  try {
+    const response = await requestApi(
+      "/api/jogadores/atual/services/sortear-atributo",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          placeId,
+          nome,
+          subcategoria,
+          latitude,
+          longitude,
+        }),
+      },
+    );
+    if (response?.jogador) {
+      response.jogador = saveLocalState(response.jogador);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+
+    const local = getOrCreateLocalState();
+    const estadoExistente = (local.estadosPlaces || []).find(
+      (e) => e.placeId === placeId,
+    );
+    let attr = extrairAtributoPersistidoServices(estadoExistente?.estoqueJson);
+    if (!attr) {
+      attr = sortearAtributoServices(Math.random());
+    }
+    const spec = obterEspecificacaoBuff(attr, "services");
+    const estoqueJson = JSON.stringify({
+      atributo: spec.atributo,
+      rotuloAtributo: spec.rotuloAtributo,
+      bonus: spec.bonus,
+      duracaoSegundos: DURACAO_SEGUNDOS_BUFF_SERVICES,
+      custoMoedas: CUSTO_MOEDAS_BUFF_SERVICES,
+    });
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome: nome || "Serviço Local",
+      categoria: "Services",
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao: estadoExistente?.estadoInteracao || "Visitado",
+      estoqueJson,
+    });
+
+    const saved = saveLocalState(local);
+    return {
+      placeId,
+      atributo: spec.atributo,
+      rotuloAtributo: spec.rotuloAtributo,
+      bonus: spec.bonus,
+      duracaoSegundos: DURACAO_SEGUNDOS_BUFF_SERVICES,
+      custoMoedas: CUSTO_MOEDAS_BUFF_SERVICES,
+      jogador: saved,
+    };
+  }
+}
+
+export async function comprarBuffServicesJogador({
+  placeId,
+  nome,
+  subcategoria = "bank",
+  latitude = 0,
+  longitude = 0,
+}) {
+  try {
+    const response = await requestApi(
+      "/api/jogadores/atual/services/comprar-buff",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          placeId,
+          nome,
+          subcategoria,
+          latitude,
+          longitude,
+        }),
+      },
+    );
+    if (response?.jogador) {
+      response.jogador = saveLocalState(response.jogador);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+
+    const local = getOrCreateLocalState();
+    const moedasAtuais = local.moedas ?? local.atributos?.moedas ?? 0;
+    if (moedasAtuais < CUSTO_MOEDAS_BUFF_SERVICES) {
+      throw new Error(
+        `Você não possui moedas suficientes para comprar este aprimoramento. Custo: ${CUSTO_MOEDAS_BUFF_SERVICES}g.`,
+        { cause: err },
+      );
+    }
+
+    const estadoExistente = (local.estadosPlaces || []).find(
+      (e) => e.placeId === placeId,
+    );
+    let attr = extrairAtributoPersistidoServices(estadoExistente?.estoqueJson);
+    if (!attr) {
+      attr = sortearAtributoServices(Math.random());
+    }
+    const spec = obterEspecificacaoBuff(attr, "services");
+
+    local.moedas = Math.max(0, moedasAtuais - CUSTO_MOEDAS_BUFF_SERVICES);
+    local.atributos.moedas = local.moedas;
+
+    const buffAplicado = aplicarOuSobrescreverBuffLocal(
+      local,
+      spec,
+      DURACAO_SEGUNDOS_BUFF_SERVICES,
+    );
+
+    if (latitude || longitude) {
+      local.posicaoAtualLatitude = latitude;
+      local.posicaoAtualLongitude = longitude;
+    }
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome: nome || "Serviço Local",
+      categoria: "Services",
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao: `Aprimoramento adquirido (+${spec.bonus} ${spec.rotuloAtributo})`,
+      estoqueJson: JSON.stringify({
+        atributo: spec.atributo,
+        rotuloAtributo: spec.rotuloAtributo,
+        bonus: spec.bonus,
+        duracaoSegundos: DURACAO_SEGUNDOS_BUFF_SERVICES,
+        custoMoedas: CUSTO_MOEDAS_BUFF_SERVICES,
+      }),
+    });
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    const saved = saveLocalState(local);
+    return {
+      atributo: spec.atributo,
+      rotuloAtributo: spec.rotuloAtributo,
+      bonusAplicado: spec.bonus,
+      duracaoSegundos: DURACAO_SEGUNDOS_BUFF_SERVICES,
+      custoMoedas: CUSTO_MOEDAS_BUFF_SERVICES,
+      mensagem: `Aprimoramento temporário adquirido com sucesso: +${spec.bonus} de ${spec.rotuloAtributo} por 10 minutos (-${CUSTO_MOEDAS_BUFF_SERVICES}g).`,
+      buffAplicado,
+      jogador: saved,
+    };
+  }
+}
+
+export async function receberAprimoramentoCultureJogador({
+  placeId,
+  nome,
+  subcategoria = "museum",
+  latitude = 0,
+  longitude = 0,
+  interacaoId = null,
+}) {
+  try {
+    const response = await requestApi(
+      "/api/jogadores/atual/culture/receber-aprimoramento",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          placeId,
+          nome,
+          subcategoria,
+          latitude,
+          longitude,
+          interacaoId,
+        }),
+      },
+    );
+    if (response?.jogador) {
+      response.jogador = saveLocalState(response.jogador);
+    }
+    return response;
+  } catch (err) {
+    if (err?.isBusinessError) throw err;
+
+    const local = getOrCreateLocalState();
+    const estadoExistente = (local.estadosPlaces || []).find(
+      (e) => e.placeId === placeId,
+    );
+    if (estadoExistente?.concluido) {
+      throw new Error(
+        "Você já utilizou a inspiração cultural disponível neste local.",
+        { cause: err },
+      );
+    }
+
+    const resultadoSorteado = sortearResultadoCulture(Math.random());
+    const spec = obterEspecificacaoBuff(resultadoSorteado, "culture");
+
+    let buffAplicado = null;
+    let mensagem;
+    let estadoInteracao;
+
+    if (spec.atributo === "nada") {
+      mensagem = "A visita foi contemplativa, mas nenhum aprimoramento foi adquirido desta vez.";
+      estadoInteracao = "Concluído (Nada)";
+    } else {
+      buffAplicado = aplicarOuSobrescreverBuffLocal(
+        local,
+        spec,
+        DURACAO_SEGUNDOS_BUFF_CULTURE,
+      );
+      mensagem = `Inspiração cultural recebida: +${spec.bonus} de ${spec.rotuloAtributo} por 5 minutos!`;
+      estadoInteracao = `Concluído (+${spec.bonus} ${spec.rotuloAtributo})`;
+    }
+
+    if (latitude || longitude) {
+      local.posicaoAtualLatitude = latitude;
+      local.posicaoAtualLongitude = longitude;
+    }
+
+    upsertLocalPlaceVisitAndState(local, {
+      placeId,
+      nome: nome || "Espaço Cultural",
+      categoria: "Culture",
+      subcategoria,
+      latitude,
+      longitude,
+      estadoInteracao,
+      marcarConcluido: true,
+      estoqueJson: JSON.stringify({
+        atributo: spec.atributo,
+        rotuloAtributo: spec.rotuloAtributo,
+        bonus: spec.bonus,
+        nomeBuff: spec.nomeBuff,
+        descricaoBuff: spec.descricaoBuff,
+        placeholderKey: spec.placeholderKey,
+        duracaoSegundos: spec.atributo === "nada" ? 0 : DURACAO_SEGUNDOS_BUFF_CULTURE,
+      }),
+    });
+
+    local.estatisticas.ultimaAtualizacaoUtc = new Date().toISOString();
+    const saved = saveLocalState(local);
+    return {
+      tipoResultado: spec.atributo === "nada" ? "nada" : "buff",
+      atributo: spec.atributo,
+      rotuloAtributo: spec.rotuloAtributo,
+      bonusAplicado: spec.bonus,
+      duracaoSegundos: spec.atributo === "nada" ? 0 : DURACAO_SEGUNDOS_BUFF_CULTURE,
+      nomeBuff: spec.nomeBuff,
+      descricaoBuff: spec.descricaoBuff,
+      placeholderKey: spec.placeholderKey,
+      mensagem,
+      buffAplicado,
+      jogador: saved,
+    };
+  }
+}
+
+export async function sincronizarBuffsJogador() {
+  try {
+    const updated = await requestApi("/api/jogadores/atual/buffs/sincronizar", {
+      method: "POST",
+    });
+    if (updated) {
+      return saveLocalState(updated);
+    }
+  } catch {
+    // Fallback local limpa buffs expirados e recalcula atributos
+  }
+  const local = getOrCreateLocalState();
+  return saveLocalState(local);
+}
+

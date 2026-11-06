@@ -1,7 +1,10 @@
+import ActiveBuffsBar from "../ActiveBuffsBar";
 import CharacterAnimatedSprite from "./CharacterAnimatedSprite";
 
 export default function CombatArena({
   personagem,
+  buffs = [],
+  onBuffExpired = null,
   hpJogador,
   energiaJogador,
   defendendo,
@@ -70,6 +73,24 @@ export default function CombatArena({
           minWidth: 160,
         }}
       >
+        {/* Seção 3: Durante um combate os ícones de aprimoramento aparecem acima do personagem do jogador com ícones levemente menores */}
+        {Array.isArray(buffs) && buffs.length > 0 && (
+          <div
+            data-testid="combat-player-buffs"
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: 8,
+            }}
+          >
+            <ActiveBuffsBar
+              buffs={buffs}
+              compact={true}
+              onBuffExpired={onBuffExpired}
+            />
+          </div>
+        )}
+
         {/* Indicador de Postura Defensiva */}
         {defendendo && (
           <div

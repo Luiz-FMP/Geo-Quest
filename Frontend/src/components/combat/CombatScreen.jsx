@@ -24,7 +24,13 @@ function formatarResumoIniciativa(ordem) {
   return ordem.map((p) => `${p.nome} (VEL ${p.velocidade})`).join(" → ");
 }
 
-export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat }) {
+export default function CombatScreen({
+  personagem,
+  buffs = [],
+  onBuffExpired = null,
+  sessaoCombate,
+  onFinishCombat,
+}) {
   const primeiraRonda = useMemo(
     () => sessaoCombate?.rondas?.[0] || [],
     [sessaoCombate],
@@ -347,6 +353,8 @@ export default function CombatScreen({ personagem, sessaoCombate, onFinishCombat
       {/* ARENA VISUAL (METADE SUPERIOR) */}
       <CombatArena
         personagem={personagem}
+        buffs={buffs}
+        onBuffExpired={onBuffExpired}
         hpJogador={hpJogador}
         energiaJogador={energiaJogador}
         defendendo={defendendo}

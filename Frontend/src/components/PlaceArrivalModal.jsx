@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { getItemPlaceholder } from "../config/placeholderAssets";
+import { useEffect, useState } from "react";
+import { getBuffPlaceholder, getItemPlaceholder } from "../config/placeholderAssets";
+import { obterEspecificacaoBuff } from "../services/playerApi";
 import {
   ALLOWED_CATEGORIES,
   getNaturalFeatureFlavorText,
@@ -75,6 +76,9 @@ export default function PlaceArrivalModal({
   onExploreNaturalFeature,
   onOpenTransportMap,
   onTrainSports,
+  onEnsureServicesAttribute,
+  onBuyServicesBuff,
+  onReceiveCultureBuff,
   onClose,
 }) {
   const [actionFeedback, setActionFeedback] = useState(null);
@@ -88,9 +92,9 @@ export default function PlaceArrivalModal({
   );
   const [naturalExplorationResult, setNaturalExplorationResult] =
     useState(null);
-  const [cultureBuffAcquired, setCultureBuffAcquired] = useState(false);
+  const [cultureBuffResult, setCultureBuffResult] = useState(null);
   const [sportsTrainedOption, setSportsTrainedOption] = useState(null);
-  const [servicesWipTriggered, setServicesWipTriggered] = useState(false);
+  const [servicesBuffSpec, setServicesBuffSpec] = useState(null);
 
   const currentContextKey = `${place?.id || "none"}:${hasArrived ? "arrived" : "preview"}`;
   if (currentContextKey !== prevContextKey) {
@@ -99,10 +103,47 @@ export default function PlaceArrivalModal({
     if (actionError !== null) setActionError(null);
     if (actionFeedback !== null) setActionFeedback(null);
     if (naturalExplorationResult !== null) setNaturalExplorationResult(null);
-    if (cultureBuffAcquired) setCultureBuffAcquired(false);
+    if (cultureBuffResult !== null) setCultureBuffResult(null);
     if (sportsTrainedOption !== null) setSportsTrainedOption(null);
-    if (servicesWipTriggered) setServicesWipTriggered(false);
+    if (servicesBuffSpec !== null) setServicesBuffSpec(null);
   }
+
+  // Seção 4: Quando selecionar um Place com a categoria Services, escolher de forma aleatória qual atributo será melhorado e salvar para esse Place.
+  useEffect(() => {
+    let active = true;
+    if (!place || place.category !== ALLOWED_CATEGORIES.SERVICES) {
+      return undefined;
+    }
+
+    const existingState = (playerState?.estadosPlaces || []).find(
+      (e) => e.placeId === place.id,
+    );
+    if (existingState?.estoqueJson) {
+      try {
+        const parsed = JSON.parse(existingState.estoqueJson);
+        if (parsed?.atributo) {
+          return undefined;
+        }
+      } catch {
+        // Ignora JSON inválido
+      }
+    }
+
+    if (typeof onEnsureServicesAttribute === "function") {
+      onEnsureServicesAttribute(place)
+        .then((res) => {
+          if (active && res?.atributo) {
+            setServicesBuffSpec(obterEspecificacaoBuff(res.atributo, "services"));
+          }
+        })
+        .catch(() => {
+          // Mantém fallback visual caso ocorra falha transitória
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [place, playerState?.estadosPlaces, onEnsureServicesAttribute]);
 
   if (!place) return null;
 
@@ -211,6 +252,38 @@ export default function PlaceArrivalModal({
   const isSportsCompleted =
     isSports && (isPlaceCompleted || sportsTrainedOption !== null);
 
+  // Em Services, recupera qual atributo foi sorteado e persistido para este Place
+  let resolvedServicesSpec = servicesBuffSpec;
+  if (isServicesBuffShop && !resolvedServicesSpec && permanentState?.estoqueJson) {
+    try {
+      const parsed = JSON.parse(permanentState.estoqueJson);
+      if (parsed?.atributo) {
+        resolvedServicesSpec = obterEspecificacaoBuff(parsed.atributo, "services");
+      }
+    } catch {
+      // Ignora JSON inválido
+    }
+  }
+
+  // Em Culture, recupera resultado persistido ou da sessão atual
+  let resolvedCultureSpec = null;
+  if (isCulture) {
+    if (cultureBuffResult?.atributo) {
+      resolvedCultureSpec = obterEspecificacaoBuff(cultureBuffResult.atributo, "culture");
+    } else if (permanentState?.estoqueJson) {
+      try {
+        const parsed = JSON.parse(permanentState.estoqueJson);
+        if (parsed?.atributo) {
+          resolvedCultureSpec = obterEspecificacaoBuff(parsed.atributo, "culture");
+        }
+      } catch {
+        // Ignora JSON inválido
+      }
+    }
+  }
+  const isCultureCompleted =
+    isCulture && (isPlaceCompleted || cultureBuffResult !== null);
+
   const vidaAtual = playerState?.atributos?.vidaAtual ?? 50;
   const vidaFinal = Math.max(1, playerState?.atributos?.vidaFinal ?? 50);
   const energiaAtual = Number(
@@ -223,6 +296,7 @@ export default function PlaceArrivalModal({
   const moedas = playerState?.moedas ?? playerState?.atributos?.moedas ?? 0;
 
   // Seção 4.3: Em Natural Features, após vasculhar, a descrição inicial é substituída pelo texto narrativo de resultado
+  // Seção 5: Em Culture, a descrição é "Espaço cultural que inspira o explorador e concede um aprimoramento cultural temporário (buff). (5 min)"
   const descriptionText = isHomeSpecial
     ? "Seu ponto inicial de aventura."
     : isBossSpecial
@@ -245,7 +319,7 @@ export default function PlaceArrivalModal({
                     : isTransportation
                       ? `Terminal de transporte (${translatedSubcategory}). Viaje diretamente para outros pontos de ${translatedSubcategory.toLowerCase()} próximos no mapa de transporte.`
                       : isCulture
-                        ? "Espaço cultural que inspira o explorador e concede um aprimoramento cultural temporário (buff)."
+                        ? "Espaço cultural que inspira o explorador e concede um aprimoramento cultural temporário (buff). (5 min)"
                         : isSports
                           ? "Local de prática esportiva e treinamento físico. Escolha um atributo base para aprimorar permanentemente nesta visita."
                           : "WIP — A funcionalidade desta categoria ainda está em desenvolvimento.";
@@ -332,14 +406,29 @@ export default function PlaceArrivalModal({
     }
   }
 
-  // Seção 3.3: Services — Loja de buffs (50g, estado WIP, sem descontar moedas nem alterar atributos)
-  function handleBuyServicesBuff() {
-    if (!hasArrived || isBusy) return;
+  // Seção 4: Services — Compra de buff temporário (50g, 10 minutos, permite compras repetidas)
+  async function handleBuyServicesBuff() {
+    if (!hasArrived || isBusy || !onBuyServicesBuff) return;
     setActionError(null);
-    setServicesWipTriggered(true);
-    setActionFeedback(
-      "WIP — O sistema de aprimoramentos temporários (buffs) ainda está em desenvolvimento. Nenhuma moeda foi descontada (custo previsto: 50g) e nenhum atributo foi alterado.",
-    );
+    setActionFeedback(null);
+    setIsBusy(true);
+    try {
+      const response = await onBuyServicesBuff(place);
+      if (response?.atributo) {
+        setServicesBuffSpec(obterEspecificacaoBuff(response.atributo, "services"));
+      }
+      setActionFeedback(
+        response?.mensagem ||
+          "Aprimoramento temporário adquirido com sucesso (-50g)!",
+      );
+    } catch (err) {
+      setActionError(
+        err?.message ||
+          "Você não possui moedas suficientes para comprar este aprimoramento. Custo: 50g.",
+      );
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   // Seção 4: Natural Features — Vasculhar local (calculado e persistido no backend)
@@ -375,12 +464,28 @@ export default function PlaceArrivalModal({
     onOpenTransportMap(place);
   }
 
-  // Seção 6: Culture — Receber buff (quadrado vazio, nome "Nada", descrição "WIP")
-  function handleReceiveCultureBuff() {
-    if (!hasArrived || isBusy) return;
+  // Seção 5: Culture — Receber aprimoramento temporário gratuito (5 min, 1 vez por Place)
+  async function handleReceiveCultureBuff() {
+    if (!hasArrived || isBusy || isCultureCompleted || !onReceiveCultureBuff) {
+      return;
+    }
     setActionError(null);
     setActionFeedback(null);
-    setCultureBuffAcquired(true);
+    setIsBusy(true);
+    try {
+      const response = await onReceiveCultureBuff(place, interactionId);
+      setCultureBuffResult(response);
+      setActionFeedback(
+        response?.mensagem ||
+          "Inspiração cultural recebida!",
+      );
+    } catch (err) {
+      setActionError(
+        err?.message || "Não foi possível receber o aprimoramento neste local.",
+      );
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   // Seção 7: Sports — Treinar 1 atributo permanente uma única vez por Place
@@ -607,8 +712,8 @@ export default function PlaceArrivalModal({
             </div>
           )}
 
-          {(isArena || isBossSpecial || isSports) &&
-            (isPlaceCompleted || isSportsCompleted) && (
+          {(isArena || isBossSpecial || isSports || isCulture) &&
+            (isPlaceCompleted || isSportsCompleted || isCultureCompleted) && (
               <div
                 data-testid="place-menu-completed-badge"
                 style={{
@@ -627,7 +732,9 @@ export default function PlaceArrivalModal({
                   ? "Boss Derrotado (Concluído)"
                   : isSports
                     ? "Aprimoramento Concluído"
-                    : "Arena Concluída"}
+                    : isCulture
+                      ? "Inspiração Concluída"
+                      : "Arena Concluída"}
               </div>
             )}
 
@@ -668,7 +775,7 @@ export default function PlaceArrivalModal({
           {descriptionText}
         </div>
 
-        {/* Seção 3.3: Painel estilo hospedagem para Services (Loja de Buffs) */}
+        {/* Seção 4: Painel para Services (Compra de Buff temporário no Place) */}
         {isServicesBuffShop && (
           <div
             data-testid="services-status-panel"
@@ -690,16 +797,23 @@ export default function PlaceArrivalModal({
               Saldo atual:{" "}
               <strong style={{ color: "#FBBF24" }}>Moedas: {moedas}g</strong>
             </div>
-            <div>
-              Serviço: <strong>Aprimoramento temporário (Buff)</strong> • Custo:{" "}
+            <div data-testid="services-buff-service-text">
+              Serviço:{" "}
+              <strong>
+                {resolvedServicesSpec
+                  ? `Aprimoramento temporário em ${resolvedServicesSpec.rotuloAtributo} (10 min)`
+                  : "Aprimoramento temporário (10 min)"}
+              </strong>{" "}
+              • Custo:{" "}
               <strong style={{ color: "#C4B5FD" }}>50 moedas (50g)</strong>
             </div>
-            {servicesWipTriggered && (
-              <div
-                data-testid="services-wip-badge"
-                style={{ color: "#FBBF24", fontWeight: 700, marginTop: 2 }}
-              >
-                Estado: WIP — Sistema de buffs em desenvolvimento.
+            {resolvedServicesSpec && (
+              <div style={{ color: "#9CAEA0" }}>
+                Bônus deste local:{" "}
+                <strong style={{ color: "#86EFAC" }}>
+                  +{resolvedServicesSpec.bonus} de {resolvedServicesSpec.rotuloAtributo}
+                </strong>{" "}
+                por 10 minutos.
               </div>
             )}
           </div>
@@ -830,8 +944,8 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* Seção 6.2: Visualização de buff adquirido em Culture (quadrado vazio, Nome: Nada, Descrição: WIP) */}
-        {isCulture && cultureBuffAcquired && (
+        {/* Seção 5: Visualização de aprimoramento adquirido em Culture */}
+        {isCulture && isCultureCompleted && resolvedCultureSpec && (
           <div
             data-testid="culture-buff-result-panel"
             style={{
@@ -857,10 +971,12 @@ export default function PlaceArrivalModal({
                 fontWeight: 700,
               }}
             >
-              Buff Adquirido
+              {resolvedCultureSpec.atributo === "nada"
+                ? "Nenhum Aprimoramento Adquirido"
+                : "Aprimoramento Adquirido (5 min)"}
             </span>
 
-            {/* Quadrado destacado reservado para o asset do buff — deve permanecer VAZIO */}
+            {/* Quadrado destacado para o ícone do aprimoramento */}
             <div
               data-testid="culture-buff-empty-square"
               style={{
@@ -870,8 +986,45 @@ export default function PlaceArrivalModal({
                 border: "2px solid #F43F5E",
                 boxShadow: "0 0 16px rgba(244, 63, 94, 0.28)",
                 borderRadius: 10,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
               }}
-            />
+            >
+              {resolvedCultureSpec.atributo !== "nada" && (
+                <>
+                  <span
+                    style={{
+                      fontSize: 28,
+                      color:
+                        getBuffPlaceholder(resolvedCultureSpec.placeholderKey)
+                          .accent || "#FDA4AF",
+                      lineHeight: 1,
+                    }}
+                  >
+                    {
+                      getBuffPlaceholder(resolvedCultureSpec.placeholderKey)
+                        .symbol
+                    }
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#EDE6D3",
+                    }}
+                  >
+                    {
+                      getBuffPlaceholder(resolvedCultureSpec.placeholderKey)
+                        .code
+                    }
+                  </span>
+                </>
+              )}
+            </div>
 
             <div
               style={{
@@ -882,7 +1035,7 @@ export default function PlaceArrivalModal({
             >
               Nome:{" "}
               <strong data-testid="culture-buff-name" style={{ color: "#FFFFFF" }}>
-                Nada
+                {resolvedCultureSpec.nomeBuff}
               </strong>
             </div>
 
@@ -898,7 +1051,7 @@ export default function PlaceArrivalModal({
                 data-testid="culture-buff-description"
                 style={{ color: "#FCD34D" }}
               >
-                WIP
+                {resolvedCultureSpec.descricaoBuff}
               </strong>
             </div>
           </div>
@@ -1341,14 +1494,14 @@ export default function PlaceArrivalModal({
               VER LOCALIZAÇÕES PRÓXIMAS
             </button>
           ) : isCulture ? (
-            /* Seção 6.1: Culture — Botão para receber o buff */
+            /* Seção 5: Culture — Botão RECEBER APRIMORAMENTO (vez única por Place) */
             <button
               type="button"
               data-testid="place-action-culture-buff"
-              disabled={!hasArrived || isBusy || cultureBuffAcquired}
+              disabled={!hasArrived || isBusy || isCultureCompleted}
               onClick={handleReceiveCultureBuff}
               style={
-                hasArrived && !isBusy && !cultureBuffAcquired
+                hasArrived && !isBusy && !isCultureCompleted
                   ? {
                       width: "100%",
                       padding: "12px 18px",
@@ -1365,7 +1518,11 @@ export default function PlaceArrivalModal({
                   : DISABLED_GRAY_BUTTON_STYLE
               }
             >
-              {cultureBuffAcquired ? "BUFF RECEBIDO (WIP)" : "RECEBER BUFF"}
+              {isBusy
+                ? "INSPIRANDO-SE..."
+                : isCultureCompleted
+                  ? "APRIMORAMENTO JÁ RECEBIDO"
+                  : "RECEBER APRIMORAMENTO"}
             </button>
           ) : isSports ? (
             /* Item 5: Sports — Aprimoramento uma única vez por Place. Se já concluído, não exibe as opções novamente */

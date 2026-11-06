@@ -1,5 +1,12 @@
-import { useState } from "react";
-import { getCharacterPlaceholder } from "../../config/placeholderAssets";
+import { useEffect, useState } from "react";
+import { getBuffPlaceholder, getCharacterPlaceholder } from "../../config/placeholderAssets";
+import {
+  calcularSegundosRestantesBuff,
+  filtrarBuffsAtivosUnicosPorAtributo,
+  formatarContadorBuff,
+  identificarAtributoBuff,
+  recalculateState,
+} from "../../services/playerApi";
 import CharacterSelectScreen from "../CharacterSelectScreen";
 import { FullScreenMenuCloseButton } from "../PlayerBottomMenu";
 
@@ -16,8 +23,18 @@ export default function PlayerStatusModal({
   const [isChangingCharacter, setIsChangingCharacter] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const atributos = playerState?.atributos || {
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const livePlayerState = playerState ? recalculateState(playerState, nowMs) : null;
+
+  const atributos = livePlayerState?.atributos || {
     vidaBase: 50,
     vidaModificador: 0,
     vidaFinal: 50,
@@ -139,7 +156,10 @@ export default function PlayerStatusModal({
     },
   ];
 
-  const buffsAtivos = Array.isArray(playerState?.buffs) ? playerState.buffs : [];
+  const buffsAtivos = filtrarBuffsAtivosUnicosPorAtributo(
+    livePlayerState?.buffs || [],
+    nowMs,
+  );
 
   return (
     <div
@@ -612,7 +632,13 @@ export default function PlayerStatusModal({
                       }}
                     >
                       <span>Base: {attr.base}</span>
-                      <span>
+                      <span
+                        data-testid={`attr-mod-${attr.key}`}
+                        style={{
+                          color: attr.modifier > 0 ? "#34D399" : "#7C8C7E",
+                          fontWeight: attr.modifier !== 0 ? 700 : 400,
+                        }}
+                      >
                         Mod: {attr.modifier >= 0 ? `+${attr.modifier}` : attr.modifier}
                       </span>
                       <span style={{ color: "#C89B5C" }}>Final: {attr.final}</span>
@@ -673,20 +699,46 @@ export default function PlayerStatusModal({
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {buffsAtivos.map((buff) => (
-                    <div
-                      key={buff.id}
-                      style={{
-                        padding: "8px 12px",
-                        background: "#121814",
-                        border: "1px solid #C89B5C",
-                        borderRadius: 6,
-                        fontSize: 12,
-                      }}
-                    >
-                      <strong>{buff.nome}</strong> — {buff.condicaoDuracao}
-                    </div>
-                  ))}
+                  {buffsAtivos.map((buff) => {
+                    const attr = identificarAtributoBuff(buff);
+                    const visual = getBuffPlaceholder(buff.placeholderKey || attr);
+                    const segRestantes = calcularSegundosRestantesBuff(buff, nowMs);
+                    const isLastMinute = segRestantes <= 60;
+                    return (
+                      <div
+                        key={buff.id}
+                        style={{
+                          padding: "8px 12px",
+                          background: "#121814",
+                          border: `1px solid ${visual.border || "#C89B5C"}`,
+                          borderRadius: 6,
+                          fontSize: 12,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ color: visual.accent, fontWeight: 700 }}>
+                          {visual.symbol}
+                        </span>
+                        <div>
+                          <strong>{buff.nome}</strong>{" "}
+                          <span style={{ color: "#9CAEA0" }}>
+                            ({buff.descricao})
+                          </span>
+                        </div>
+                        <span
+                          style={{
+                            fontFamily: "'IBM Plex Mono', monospace",
+                            fontWeight: 700,
+                            color: isLastMinute ? "#EF4444" : "#34D399",
+                          }}
+                        >
+                          {formatarContadorBuff(segRestantes)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </section>

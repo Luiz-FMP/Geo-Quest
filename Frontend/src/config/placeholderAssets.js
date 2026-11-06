@@ -1,5 +1,5 @@
 /**
- * Centraliza todos os placeholders visuais (personagens, itens, ícones de menu, slots e raridades)
+ * Centraliza todos os placeholders visuais (personagens, itens, ícones de menu, slots, raridades e buffs)
  * para manter a lógica de negócio desacoplada de caminhos de imagem/assets definitivos.
  */
 
@@ -126,3 +126,64 @@ export const EQUIPMENT_SLOT_PLACEHOLDERS = {
   Arma: { code: "ARM", label: "Arma", position: "bottom" },
 };
 
+export const BUFF_PLACEHOLDERS = {
+  buff_vida: {
+    code: "VID",
+    symbol: "♥",
+    label: "Vida",
+    accent: "#EF4444",
+    border: "rgba(239, 68, 68, 0.65)",
+    bg: "rgba(239, 68, 68, 0.18)",
+  },
+  buff_energia: {
+    code: "ENE",
+    symbol: "⚡",
+    label: "Energia",
+    accent: "#38BDF8",
+    border: "rgba(56, 189, 248, 0.65)",
+    bg: "rgba(56, 189, 248, 0.18)",
+  },
+  buff_dano: {
+    code: "DAN",
+    symbol: "⚔",
+    label: "Dano",
+    accent: "#F97316",
+    border: "rgba(249, 115, 22, 0.65)",
+    bg: "rgba(249, 115, 22, 0.18)",
+  },
+  buff_defesa: {
+    code: "DEF",
+    symbol: "🛡",
+    label: "Defesa",
+    accent: "#60A5FA",
+    border: "rgba(96, 165, 250, 0.65)",
+    bg: "rgba(96, 165, 250, 0.18)",
+  },
+  buff_velocidade: {
+    code: "VEL",
+    symbol: "➤",
+    label: "Velocidade",
+    accent: "#A855F7",
+    border: "rgba(168, 85, 247, 0.65)",
+    bg: "rgba(168, 85, 247, 0.18)",
+  },
+  buff_nada: {
+    code: "---",
+    symbol: "∅",
+    label: "Nada",
+    accent: "#94A3B8",
+    border: "rgba(148, 163, 184, 0.45)",
+    bg: "rgba(148, 163, 184, 0.14)",
+  },
+};
+
+export function getBuffPlaceholder(placeholderKeyOrAttr) {
+  const raw = String(placeholderKeyOrAttr || "").trim().toLowerCase();
+  if (BUFF_PLACEHOLDERS[raw]) {
+    return BUFF_PLACEHOLDERS[raw];
+  }
+  if (BUFF_PLACEHOLDERS[`buff_${raw}`]) {
+    return BUFF_PLACEHOLDERS[`buff_${raw}`];
+  }
+  return BUFF_PLACEHOLDERS.buff_vida;
+}
