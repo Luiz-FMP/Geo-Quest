@@ -1,137 +1,98 @@
-using GeoQuest.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using GeoQuest.Api.Models;
 
 namespace GeoQuest.Api.Data;
 
 public class GeoQuestDbContext : DbContext
 {
-    public GeoQuestDbContext(DbContextOptions<GeoQuestDbContext> options)
-        : base(options)
+    public GeoQuestDbContext(DbContextOptions<GeoQuestDbContext> options) : base(options)
     {
     }
 
-    public DbSet<Jogador> Jogadores { get; set; }
-    public DbSet<Personagem> Personagens { get; set; }
-    public DbSet<ItemDefinicao> ItensDefinicao { get; set; }
-    public DbSet<ItemInventario> ItensInventario { get; set; }
-    public DbSet<BuffJogador> BuffsJogador { get; set; }
-    public DbSet<EstatisticaJogador> EstatisticasJogador { get; set; }
-    public DbSet<Categoria> Categorias { get; set; }
-    public DbSet<MissaoConcluida> MissoesConcluidas { get; set; }
-    public DbSet<Cidade> Cidades { get; set; }
-    public DbSet<Boss> Bosses { get; set; }
-    public DbSet<Inimigo> Inimigos { get; set; }
-    public DbSet<EstadoPermanentePlace> EstadosPlaces { get; set; }
-    public DbSet<HistoricoVisitaPlace> HistoricoVisitas { get; set; }
+    public DbSet<Jogador> Jogadores => Set<Jogador>();
+    public DbSet<Personagem> Personagens => Set<Personagem>();
+    public DbSet<Cidade> Cidades => Set<Cidade>();
+    public DbSet<Categoria> Categorias => Set<Categoria>();
+    public DbSet<MissaoConcluida> MissoesConcluidas => Set<MissaoConcluida>();
+    public DbSet<Inimigo> Inimigos => Set<Inimigo>();
+    public DbSet<Boss> Bosses => Set<Boss>();
+    public DbSet<ItemDefinicao> ItensDefinicoes => Set<ItemDefinicao>();
+    public DbSet<ItemInventario> ItensInventario => Set<ItemInventario>();
+    public DbSet<EstatisticaJogador> EstatisticasJogadores => Set<EstatisticaJogador>();
+    public DbSet<BuffJogador> BuffsJogadores => Set<BuffJogador>();
+    public DbSet<HistoricoVisitaPlace> HistoricoVisitasPlaces => Set<HistoricoVisitaPlace>();
+    public DbSet<EstadoPermanentePlace> EstadosPermanentesPlaces => Set<EstadoPermanentePlace>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<Personagem>().HasData(
-            new Personagem
-            {
-                Id = 1,
-                Nome = "Miguel",
-                Descricao = "Forte e resistente, aguenta vários combates.",
-                Vida = 120,
-                Ataque = 15,
-                Defesa = 10,
-                Vantagem = "Resistência a dano",
-                Disponivel = true,
-                PlaceholderKey = "char_1"
-            },
-            new Personagem
-            {
-                Id = 2,
-                Nome = "Amélia",
-                Descricao = "Frágil, mas causa muito dano.",
-                Vida = 70,
-                Ataque = 30,
-                Defesa = 3,
-                Vantagem = "Ataques únicos que causam muito dano.",
-                Disponivel = true,
-                PlaceholderKey = "char_2"
-            },
-            new Personagem
-            {
-                Id = 3,
-                Nome = "Benjamin",
-                Descricao = "Resistente e ágil, consegue disparar varios golpes.",
-                Vida = 100,
-                Ataque = 10,
-                Defesa = 7,
-                Vantagem = "Múltiplos ataques.",
-                Disponivel = true,
-                PlaceholderKey = "char_3"
-            },
-            new Personagem
-            {
-                Id = 4,
-                Nome = "Z",
-                Descricao = "Controle de área, explosões em área.",
-                Vida = 75,
-                Ataque = 20,
-                Defesa = 5,
-                Vantagem = "Dano em área.",
-                Disponivel = true,
-                PlaceholderKey = "char_4"
-            }
-        );
+        modelBuilder.Entity<Personagem>().HasData(DatabaseInitializer.GetDefaultPersonagens());
 
-        modelBuilder.Entity<Jogador>(entity =>
-        {
-            entity.HasOne(j => j.Personagem)
-                .WithMany(p => p.Jogadores)
-                .HasForeignKey(j => j.PersonagemId)
-                .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Jogador>()
+            .HasOne(j => j.Cidade)
+            .WithMany(c => c.Jogadores)
+            .HasForeignKey(j => j.CidadeId)
+            .OnDelete(DeleteBehavior.Restrict);
 
-            entity.HasOne(j => j.Estatisticas)
-                .WithOne(e => e.Jogador)
-                .HasForeignKey<EstatisticaJogador>(e => e.JogadorId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
+        modelBuilder.Entity<Jogador>()
+            .HasOne(j => j.Personagem)
+            .WithMany(p => p.Jogadores)
+            .HasForeignKey(j => j.PersonagemId)
+            .OnDelete(DeleteBehavior.Restrict);
 
-        modelBuilder.Entity<ItemInventario>(entity =>
-        {
-            entity.HasOne(i => i.Jogador)
-                .WithMany(j => j.ItensInventario)
-                .HasForeignKey(i => i.JogadorId)
-                .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Jogador>()
+            .HasOne(j => j.Estatistica)
+            .WithOne(e => e.Jogador)
+            .HasForeignKey<EstatisticaJogador>(e => e.JogadorId)
+            .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(i => i.ItemDefinicao)
-                .WithMany()
-                .HasForeignKey(i => i.ItemDefinicaoId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+        modelBuilder.Entity<ItemInventario>()
+            .HasOne(i => i.Jogador)
+            .WithMany(j => j.Inventario)
+            .HasForeignKey(i => i.JogadorId)
+            .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<BuffJogador>(entity =>
-        {
-            entity.HasOne(b => b.Jogador)
-                .WithMany(j => j.Buffs)
-                .HasForeignKey(b => b.JogadorId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
+        modelBuilder.Entity<ItemInventario>()
+            .HasOne(i => i.ItemDefinicao)
+            .WithMany(d => d.ItensInventario)
+            .HasForeignKey(i => i.ItemDefinicaoId)
+            .OnDelete(DeleteBehavior.Restrict);
 
-        modelBuilder.Entity<EstadoPermanentePlace>(entity =>
-        {
-            entity.HasIndex(e => new { e.JogadorId, e.PlaceId })
-                .IsUnique();
+        modelBuilder.Entity<BuffJogador>()
+            .HasOne(b => b.Jogador)
+            .WithMany(j => j.Buffs)
+            .HasForeignKey(b => b.JogadorId)
+            .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(e => e.Jogador)
-                .WithMany(j => j.EstadosPlaces)
-                .HasForeignKey(e => e.JogadorId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
+        modelBuilder.Entity<HistoricoVisitaPlace>()
+            .HasOne(h => h.Jogador)
+            .WithMany(j => j.HistoricoVisitas)
+            .HasForeignKey(h => h.JogadorId)
+            .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<HistoricoVisitaPlace>(entity =>
-        {
-            entity.HasIndex(h => new { h.JogadorId, h.Categoria, h.DataVisitaUtc });
+        modelBuilder.Entity<EstadoPermanentePlace>()
+            .HasOne(e => e.Jogador)
+            .WithMany(j => j.EstadosPermanentesPlaces)
+            .HasForeignKey(e => e.JogadorId)
+            .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(h => h.Jogador)
-                .WithMany(j => j.HistoricoVisitas)
-                .HasForeignKey(h => h.JogadorId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
+        modelBuilder.Entity<MissaoConcluida>()
+            .HasOne(m => m.Jogador)
+            .WithMany(j => j.MissoesConcluidas)
+            .HasForeignKey(m => m.JogadorId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<MissaoConcluida>()
+            .HasOne(m => m.Cidade)
+            .WithMany(c => c.MissoesConcluidas)
+            .HasForeignKey(m => m.CidadeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<MissaoConcluida>()
+            .HasOne(m => m.Categoria)
+            .WithMany(cat => cat.MissoesConcluidas)
+            .HasForeignKey(m => m.CategoriaId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

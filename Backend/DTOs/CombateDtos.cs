@@ -1,40 +1,22 @@
 namespace GeoQuest.Api.DTOs;
 
-public class IniciarCombateRequest
+public class InimigoCombateDto
 {
-    public int JogadorId { get; set; }
-    public string TipoCombate { get; set; } = "Emboscada"; // "Emboscada", "Arena", "Boss"
-    public string NomeLocal { get; set; } = string.Empty;
-    public string? PlaceId { get; set; }
-    public int? CidadeId { get; set; }
-}
-
-public class CombatenteInimigoDto
-{
-    public string InstanciaId { get; set; } = Guid.NewGuid().ToString();
-    public int OrigemId { get; set; }
+    public string InstanciaId { get; set; } = Guid.NewGuid().ToString("N");
     public string Nome { get; set; } = string.Empty;
-    public string Tier { get; set; } = "Comum"; // "Comum", "MiniBoss", "Boss"
     public int VidaMaxima { get; set; }
     public int VidaAtual { get; set; }
     public int Ataque { get; set; }
     public int Defesa { get; set; }
     public int Velocidade { get; set; }
+    public int RecompensaXP { get; set; }
+    public string Tier { get; set; } = "Normal";
 }
 
 public class SessaoCombateDto
 {
     public string TipoCombate { get; set; } = string.Empty;
     public string NomeLocal { get; set; } = string.Empty;
-    public string? PlaceId { get; set; }
     public bool PermiteFuga { get; set; }
-    public List<List<CombatenteInimigoDto>> Rondas { get; set; } = new();
-}
-
-public class ResultadoRecompensaDto
-{
-    public bool Vitoria { get; set; }
-    public int MoedasGanhas { get; set; }
-    public bool GanhouItem { get; set; }
-    public string? ItemNome { get; set; }
+    public List<List<InimigoCombateDto>> Rondas { get; set; } = new();
 }

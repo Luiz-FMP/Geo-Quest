@@ -1,23 +1,28 @@
-/**
- * Obtenção da localização real do jogador via Browser Geolocation API.
- *
- * Um único getCurrentPosition() não é confiável em computadores sem GPS: a primeira leitura
- * costuma vir de IP/Wi-Fi com precisão de vários quilômetros, então duas sessões iniciadas no
- * mesmo lugar podem começar em pontos bem diferentes. Aqui observamos as leituras por alguns
- * segundos (watchPosition) e ficamos com a de melhor precisão. Nunca inventa coordenadas: se
- * nenhuma leitura válida chegar, a Promise é rejeitada.
- */
-
-// Leitura com precisão igual ou melhor que esta encerra a amostragem na hora.
 const PRECISAO_BOA_METROS = 50;
-// Após a primeira leitura, aguarda este tempo por leituras mais precisas.
+
 const JANELA_AMOSTRAGEM_MS = 6000;
-// Tempo máximo total sem nenhuma leitura válida.
+
 const TEMPO_LIMITE_MS = 15000;
-// Acima disto a leitura provavelmente é aproximada por IP/rede.
+
 export const PRECISAO_BAIXA_METROS = 1000;
 
 export const ERRO_GEOLOCALIZACAO_INVALIDA = "INVALID_POSITION";
+
+export function haversineDistanceKm(a, b) {
+  if (!a || !b) return 0;
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      sinLng *
+      sinLng;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
 
 function leituraValida(latitude, longitude) {
   return (
@@ -32,11 +37,6 @@ function leituraValida(latitude, longitude) {
   );
 }
 
-/**
- * @returns {Promise<{ latitude: number, longitude: number, accuracy: number }>}
- *   Rejeita com `{ code }`: 1 = permissão negada, 2 = indisponível, 3 = tempo esgotado,
- *   ERRO_GEOLOCALIZACAO_INVALIDA = o navegador só devolveu dados inválidos.
- */
 export function obterLocalizacaoPrecisa({
   precisaoBoaMetros = PRECISAO_BOA_METROS,
   janelaAmostragemMs = JANELA_AMOSTRAGEM_MS,
@@ -101,12 +101,12 @@ export function obterLocalizacaoPrecisa({
         }
       },
       (error) => {
-        // Uma leitura boa já obtida vale mais que um erro posterior da amostragem.
+
         if (melhor && error?.code !== 1) {
           encerrar(resolve, melhor);
           return;
         }
-        // Timeout isolado do watch: continua aguardando até o tempo limite total.
+
         if (error?.code === 3) return;
         encerrar(reject, { code: error?.code ?? 2, message: error?.message });
       },

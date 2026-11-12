@@ -49,7 +49,7 @@ export default function CombatArena({
         backgroundColor: "#0D130F",
       }}
     >
-      {/* Imagem de Fundo Dinâmica por Tipo de Combate */}
+
       <div
         style={{
           position: "absolute",
@@ -62,7 +62,6 @@ export default function CombatArena({
         }}
       />
 
-      {/* Vinheta atmosférica para contraste com sprites e HUD */}
       <div
         style={{
           position: "absolute",
@@ -74,7 +73,6 @@ export default function CombatArena({
         }}
       />
 
-      {/* Linha tática de profundidade do piso */}
       <div
         style={{
           position: "absolute",
@@ -89,7 +87,6 @@ export default function CombatArena({
         }}
       />
 
-      {/* LADO ESQUERDO: PERSONAGEM DO JOGADOR */}
       <div
         style={{
           position: "relative",
@@ -104,7 +101,7 @@ export default function CombatArena({
           minWidth: 170,
         }}
       >
-        {/* Seção 3: Durante um combate os ícones de aprimoramento aparecem acima do personagem do jogador com ícones levemente menores */}
+
         {Array.isArray(buffs) && buffs.length > 0 && (
           <div
             data-testid="combat-player-buffs"
@@ -122,7 +119,6 @@ export default function CombatArena({
           </div>
         )}
 
-        {/* Indicador de Postura Defensiva */}
         {defendendo && (
           <div
             style={{
@@ -143,7 +139,6 @@ export default function CombatArena({
           </div>
         )}
 
-        {/* Sprite Animado do Personagem */}
         <div
           style={{
             display: "flex",
@@ -162,7 +157,6 @@ export default function CombatArena({
           />
         </div>
 
-        {/* Sombra suave nos pés */}
         <div
           style={{
             width: 100,
@@ -185,7 +179,6 @@ export default function CombatArena({
           {personagem.nome}
         </div>
 
-        {/* Barras Compactas sob o Jogador */}
         <div
           style={{
             width: 145,
@@ -266,7 +259,6 @@ export default function CombatArena({
         </div>
       </div>
 
-      {/* LADO DIREITO: GRUPO DE INIMIGOS */}
       <div
         style={{
           position: "relative",
@@ -323,7 +315,7 @@ export default function CombatArena({
                 position: "relative",
               }}
             >
-              {/* Indicador de Alvo Selecionado */}
+
               {selecionado && (
                 <div
                   style={{
@@ -338,7 +330,6 @@ export default function CombatArena({
                 </div>
               )}
 
-              {/* Token do Inimigo */}
               <div
                 style={{
                   width: tamanhoCaixa,
@@ -369,7 +360,6 @@ export default function CombatArena({
                 </span>
               </div>
 
-              {/* Sombra no chão */}
               <div
                 style={{
                   width: tamanhoCaixa * 0.75,
@@ -381,7 +371,6 @@ export default function CombatArena({
                 }}
               />
 
-              {/* Nome do Inimigo */}
               <div
                 style={{
                   fontWeight: 700,
@@ -398,7 +387,6 @@ export default function CombatArena({
                 {ini.nome}
               </div>
 
-              {/* Barra de Vida do Inimigo */}
               <div
                 style={{
                   width: 110,

@@ -1,16 +1,7 @@
 import { getCharacterConfig } from "../config/characterAssets";
 
-/**
- * Utilitário para pré-renderizar e gerenciar frames do marcador do jogador no Google Maps.
- * Cria DataURLs otimizados para o marcador, com sombra e suporte a corrida suave e espelhamento.
- */
-
-// Cache de DataURLs pré-renderizados para evitar repetições
 const spriteCache = new Map();
 
-/**
- * Renderiza um recorte de sprite para um canvas de tamanho fixo com sombra suave nos pés.
- */
 function renderFrameToDataUrl(img, frame, flipX = false, targetSize = 64) {
   const canvas = document.createElement("canvas");
   canvas.width = targetSize;
@@ -21,7 +12,6 @@ function renderFrameToDataUrl(img, frame, flipX = false, targetSize = 64) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
-  // Sombra suave sob os pés
   ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
   ctx.beginPath();
   ctx.ellipse(
@@ -35,7 +25,6 @@ function renderFrameToDataUrl(img, frame, flipX = false, targetSize = 64) {
   );
   ctx.fill();
 
-  // Dimensões do desenho
   const maxDim = Math.max(frame.w, frame.h, 1);
   const drawScale = (targetSize - 8) / maxDim;
   const drawW = Math.round(frame.w * drawScale);
@@ -61,9 +50,6 @@ function renderFrameToDataUrl(img, frame, flipX = false, targetSize = 64) {
   return canvas.toDataURL("image/png");
 }
 
-/**
- * Carrega a imagem e pré-computa os frames para o personagem.
- */
 export async function precomputePlayerMarkerFrames(characterName) {
   const config = getCharacterConfig(characterName);
   if (!config.hasSprite) return null;
@@ -99,14 +85,12 @@ export async function precomputePlayerMarkerFrames(characterName) {
       idleImg = sheetImg;
     }
 
-    // 1. Idle (Frente no mapa)
     const idleAnim = config.animations?.mapIdle;
     if (idleAnim && idleAnim.frames?.length > 0) {
       const sourceImg = idleAnim.useIdleImage ? idleImg : sheetImg;
       result.idle = renderFrameToDataUrl(sourceImg, idleAnim.frames[0], false);
     }
 
-    // 2. Corrida (Direita e Esquerda)
     const runAnim = config.animations?.run;
     if (runAnim && runAnim.frames?.length > 0 && sheetImg) {
       const invertRun = Boolean(runAnim.flipX);

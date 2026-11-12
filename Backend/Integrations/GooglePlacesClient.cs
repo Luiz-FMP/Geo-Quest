@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GeoQuest.Api.DTOs;
 using GeoQuest.Api.Services;
 
@@ -8,807 +10,620 @@ namespace GeoQuest.Api.Integrations;
 
 public class GooglePlacesClient : IGooglePlacesClient
 {
-    private static readonly int[] ProgressiveTransportRadiiMeters = [5000, 15000, 30000, 50000];
-    public const double FarTransportDestinationThresholdKm = 5.0;
-    public const int MaxPlacesNewQueryCount = 20;
-    public const int MaxAllowedRadiusMeters = 50000;
+    private const string PlacesNearbyUrl = "https://places.googleapis.com/v1/places:searchNearby";
+    private const string FieldMask = "places.id,places.displayName,places.location,places.types,places.primaryType";
+
+    private static readonly ConcurrentDictionary<string, (DateTime ExpiresAtUtc, List<GamePoiDto> Places)> NearbyCache = new();
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(3);
+
+    private static readonly string[][] SearchBatches =
+    [
+        [
+            "shopping_mall", "supermarket", "book_store", "clothing_store", "electronics_store", "department_store",
+            "restaurant", "cafe", "bakery", "bar", "fast_food_restaurant", "ice_cream_shop", "coffee_shop",
+            "hospital",
+            "hotel", "hostel", "inn", "motel", "resort_hotel",
+            "park", "city_park", "plaza", "movie_theater", "tourist_attraction", "botanical_garden",
+            "museum", "art_gallery", "cultural_landmark", "historical_place", "monument"
+        ],
+        [
+            "barber_shop", "beauty_salon", "laundry", "veterinary_care", "florist",
+            "beach", "scenic_spot", "woods", "nature_preserve", "natural_feature",
+            "gym", "fitness_center", "stadium", "sports_complex", "swimming_pool",
+            "bus_station", "subway_station", "train_station", "transit_station", "airport", "ferry_terminal", "bus_stop"
+        ]
+    ];
+
+    private static readonly Dictionary<string, (string[] ApiTypes, string[] NameKeywords)> TransportSearchProfiles =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bus_station"] = (["bus_station", "transit_station", "transit_depot"], ["rodoviaria", "rodoviária", "terminal", "estacao", "estação", "onibus", "ônibus", "bus"]),
+            ["bus_stop"] = (["bus_stop", "transit_station"], ["ponto de onibus", "ponto de ônibus", "parada", "tubo", "estacao tubo", "estação tubo", "onibus", "ônibus", "bus"]),
+            ["subway_station"] = (["subway_station", "light_rail_station", "train_station", "transit_station"], ["metro", "metrô", "estacao", "estação", "subway", "cptm", "trem"]),
+            ["train_station"] = (["train_station", "light_rail_station", "subway_station", "transit_station"], ["trem", "estacao", "estação", "ferroviaria", "ferroviária", "train", "cptm"]),
+            ["light_rail_station"] = (["light_rail_station", "subway_station", "train_station", "transit_station"], ["vlt", "bonde", "estacao", "estação", "trem", "metro", "metrô"]),
+            ["transit_station"] = (["transit_station", "bus_station", "subway_station", "train_station", "bus_stop"], ["terminal", "estacao", "estação", "transporte", "integracao", "integração"]),
+            ["public_transit_station"] = (["transit_station", "bus_station", "subway_station", "train_station"], ["terminal", "estacao", "estação", "transporte"]),
+            ["transit_stop"] = (["bus_stop", "transit_station"], ["parada", "ponto", "estacao", "estação"]),
+            ["transit_depot"] = (["transit_depot", "bus_station", "transit_station"], ["garagem", "terminal", "deposito", "depósito"]),
+            ["K_depot"] = (["transit_depot", "bus_station", "transit_station"], ["garagem", "terminal", "deposito", "depósito"]),
+            ["airport"] = (["airport", "international_airport", "airstrip", "heliport"], ["aeroporto", "airport", "aerodromo", "aeródromo"]),
+            ["international_airport"] = (["international_airport", "airport"], ["aeroporto", "airport", "internacional"]),
+            ["airstrip"] = (["airstrip", "airport", "heliport"], ["pista", "aerodromo", "aeródromo", "aeroporto"]),
+            ["heliport"] = (["heliport", "airport"], ["heliporto", "heliponto", "heliport"]),
+            ["ferry_terminal"] = (["ferry_terminal", "marina", "transit_station"], ["balsa", "ferry", "barca", "terminal hidroviario", "terminal marítimo", "porto", "pier"]),
+            ["ferry_service"] = (["ferry_terminal", "marina", "transit_station"], ["balsa", "ferry", "barca", "travessia"]),
+            ["taxi_stand"] = (["taxi_stand", "transit_station"], ["taxi", "táxi", "ponto de taxi", "ponto de táxi"]),
+            ["taxi_service"] = (["taxi_stand", "transit_station"], ["taxi", "táxi", "cooperativa", "radio taxi"]),
+            ["park_and_ride"] = (["park_and_ride", "parking", "transit_station"], ["estacionamento", "park", "integracao", "integração"]),
+            ["rest_stop"] = (["rest_stop", "gas_station"], ["parada", "descanso", "posto", "rodovia"]),
+            ["toll_station"] = (["transit_station"], ["pedagio", "pedágio"]),
+            ["train_ticket_office"] = (["train_station", "transit_station"], ["bilheteria", "passagem", "estacao", "estação", "trem"]),
+            ["truck_stop"] = (["rest_stop", "gas_station"], ["caminhao", "caminhão", "posto", "parada"]),
+            ["valet_parking"] = (["parking"], ["valet", "manobrista", "estacionamento"]),
+            ["weigh_station"] = (["transit_station"], ["balanca", "balança", "pesagem"])
+        };
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
-    private readonly PlaceCategoryMapper _categoryMapper;
     private readonly ILogger<GooglePlacesClient> _logger;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     public GooglePlacesClient(
         HttpClient httpClient,
         IConfiguration configuration,
-        PlaceCategoryMapper categoryMapper,
         ILogger<GooglePlacesClient> logger)
     {
         _httpClient = httpClient;
         _configuration = configuration;
-        _categoryMapper = categoryMapper;
         _logger = logger;
     }
 
-    public async Task<PlacesLookupResult> GetNearbyPlacesAsync(
+    public async Task<IReadOnlyList<GamePoiDto>> SearchNearbyGamePoisAsync(
         double latitude,
         double longitude,
-        int radiusMeters,
+        double radiusMeters = 1200,
         CancellationToken cancellationToken = default)
     {
-        var apiKey = ResolveApiKey();
+        var clampedRadius = Math.Clamp(radiusMeters, 100, 50000);
+        var cacheKey = string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:F3}:{1:F3}:{2:F0}",
+            latitude,
+            longitude,
+            clampedRadius);
+
+        if (NearbyCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+            return cached.Places;
+
+        var apiKey = ResolveGoogleApiKey(_configuration, ["GooglePlaces:ApiKey", "GoogleMaps:ApiKey"], ["GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY", "VITE_GOOGLE_MAPS_API_KEY"]);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return new PlacesLookupResult(
-                false,
-                Array.Empty<GamePoiDto>(),
-                "MISSING_API_KEY",
-                "Chave da Google Places API não configurada no servidor."
-            );
+            _logger.LogWarning("Chave da API Google Places não configurada.");
+            return [];
         }
 
-        // Places API (New) é o caminho principal: projetos Google Cloud novos não conseguem
-        // habilitar a API legada (retorna REQUEST_DENIED "You're calling a legacy API").
-        var newApiResult = await QueryNearbyPlacesNewAsync(latitude, longitude, radiusMeters, apiKey, cancellationToken);
-        if (newApiResult.IsSuccess)
+        var mergedById = new Dictionary<string, GamePoiDto>(StringComparer.Ordinal);
+        bool anyBatchSucceeded = false;
+
+        foreach (var batch in SearchBatches)
         {
-            return newApiResult;
-        }
-
-        _logger.LogWarning(
-            "Places API (New) falhou ({ErrorCode}); tentando a Places API legada.",
-            newApiResult.ErrorCode);
-
-        var legacyResult = await QueryNearbyPlacesLegacyAsync(latitude, longitude, radiusMeters, apiKey, cancellationToken);
-        if (legacyResult.IsSuccess)
-        {
-            return legacyResult;
-        }
-
-        return new PlacesLookupResult(
-            false,
-            Array.Empty<GamePoiDto>(),
-            newApiResult.ErrorCode ?? legacyResult.ErrorCode ?? "PLACES_ERROR",
-            $"{newApiResult.ErrorMessage} (API legada: {legacyResult.ErrorCode})"
-        );
-    }
-
-    private async Task<PlacesLookupResult> QueryNearbyPlacesNewAsync(
-        double latitude,
-        double longitude,
-        int radiusMeters,
-        string apiKey,
-        CancellationToken cancellationToken)
-    {
-        const string url = "https://places.googleapis.com/v1/places:searchNearby";
-        var payload = new
-        {
-            maxResultCount = MaxPlacesNewQueryCount,
-            languageCode = "pt-BR",
-            locationRestriction = new
+            try
             {
-                circle = new
+                var places = await ExecuteNearbyBatchAsync(apiKey, latitude, longitude, clampedRadius, batch, cancellationToken);
+                anyBatchSucceeded = true;
+
+                foreach (var p in places)
                 {
-                    center = new { latitude, longitude },
-                    radius = (double)Math.Clamp(radiusMeters, 1, MaxAllowedRadiusMeters)
-                }
-            }
-        };
+                    if (string.IsNullOrWhiteSpace(p.Id) || p.Location == null)
+                        continue;
 
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, url)
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-            };
-            request.Headers.TryAddWithoutValidation("X-Goog-Api-Key", apiKey);
-            request.Headers.TryAddWithoutValidation(
-                "X-Goog-FieldMask",
-                "places.id,places.displayName,places.location,places.primaryType,places.types,places.formattedAddress"
-            );
+                    var classification = PlaceCategoryMapper.ClassifyPlace(p.PrimaryType, p.Types);
+                    if (classification == null)
+                        continue;
 
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                var statusCode = (int)response.StatusCode;
-                var errorCode = statusCode switch
-                {
-                    403 => "REQUEST_DENIED",
-                    429 => "OVER_QUERY_LIMIT",
-                    _ => "UPSTREAM_HTTP_ERROR"
-                };
-                _logger.LogWarning("Places API (New) retornou HTTP {StatusCode}", statusCode);
-                return new PlacesLookupResult(
-                    false,
-                    Array.Empty<GamePoiDto>(),
-                    errorCode,
-                    $"A Places API (New) retornou HTTP {statusCode}. Verifique se ela está habilitada para a chave."
-                );
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-
-            var places = new List<GamePoiDto>();
-            if (doc.RootElement.TryGetProperty("places", out var placesEl) && placesEl.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in placesEl.EnumerateArray())
-                {
-                    var parsed = ParsePlaceNewItem(item, expectedTransportType: null);
-                    if (parsed is not null)
+                    mergedById[p.Id] = new GamePoiDto
                     {
-                        places.Add(parsed);
-                    }
+                        Id = p.Id,
+                        Name = string.IsNullOrWhiteSpace(p.DisplayName?.Text) ? "Local sem nome" : p.DisplayName!.Text!,
+                        Lat = p.Location.Latitude,
+                        Lng = p.Location.Longitude,
+                        Category = classification.Category,
+                        Subcategory = classification.Subcategory,
+                        Color = classification.Color,
+                        IsBossSpecial = classification.IsBossSpecial
+                    };
                 }
             }
-
-            // Resposta sem "places" significa zero resultados na Places API (New).
-            return new PlacesLookupResult(true, places);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new PlacesLookupResult(
-                false,
-                Array.Empty<GamePoiDto>(),
-                "TIMEOUT",
-                "Tempo limite esgotado ao buscar pontos de interesse."
-            );
-        }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException)
-        {
-            _logger.LogWarning(ex, "Erro ao chamar a Places API (New).");
-            return new PlacesLookupResult(
-                false,
-                Array.Empty<GamePoiDto>(),
-                "NETWORK_ERROR",
-                "Erro de rede ao consultar pontos de interesse."
-            );
-        }
-    }
-
-    private async Task<PlacesLookupResult> QueryNearbyPlacesLegacyAsync(
-        double latitude,
-        double longitude,
-        int radiusMeters,
-        string apiKey,
-        CancellationToken cancellationToken)
-    {
-        var latStr = latitude.ToString(CultureInfo.InvariantCulture);
-        var lngStr = longitude.ToString(CultureInfo.InvariantCulture);
-        var url = $"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={latStr},{lngStr}&radius={radiusMeters}&language=pt-BR&key={Uri.EscapeDataString(apiKey)}";
-
-        try
-        {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            catch (Exception ex)
             {
-                _logger.LogWarning("Google Places API returned HTTP {StatusCode}", (int)response.StatusCode);
-                return new PlacesLookupResult(
-                    false,
-                    Array.Empty<GamePoiDto>(),
-                    "UPSTREAM_HTTP_ERROR",
-                    "Falha ao consultar o serviço Google Places."
-                );
+                _logger.LogWarning(ex, "Falha ao consultar lote da Google Places API (New).");
             }
+        }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = doc.RootElement;
-
-            var status = root.TryGetProperty("status", out var statusProp)
-                ? statusProp.GetString()
-                : "UNKNOWN_ERROR";
-
-            if (status == "ZERO_RESULTS")
+        if (mergedById.Count == 0)
+        {
+            try
             {
-                return new PlacesLookupResult(true, Array.Empty<GamePoiDto>());
-            }
+                var unrestrictedPlaces = await ExecuteNearbyBatchAsync(apiKey, latitude, longitude, clampedRadius, null, cancellationToken);
+                anyBatchSucceeded = true;
 
-            if (status != "OK")
-            {
-                _logger.LogWarning("Google Places API returned status {Status}", status);
-                return new PlacesLookupResult(
-                    false,
-                    Array.Empty<GamePoiDto>(),
-                    status ?? "PLACES_ERROR",
-                    $"A Google Places API retornou o status: {status}."
-                );
-            }
-
-            var places = new List<GamePoiDto>();
-            if (root.TryGetProperty("results", out var resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in resultsProp.EnumerateArray())
+                foreach (var p in unrestrictedPlaces)
                 {
-                    var parsed = ParsePlaceItem(item);
-                    if (parsed is not null)
+                    if (string.IsNullOrWhiteSpace(p.Id) || p.Location == null)
+                        continue;
+
+                    var classification = PlaceCategoryMapper.ClassifyPlace(p.PrimaryType, p.Types);
+                    if (classification == null)
+                        continue;
+
+                    mergedById[p.Id] = new GamePoiDto
                     {
-                        places.Add(parsed);
-                    }
+                        Id = p.Id,
+                        Name = string.IsNullOrWhiteSpace(p.DisplayName?.Text) ? "Local sem nome" : p.DisplayName!.Text!,
+                        Lat = p.Location.Latitude,
+                        Lng = p.Location.Longitude,
+                        Category = classification.Category,
+                        Subcategory = classification.Subcategory,
+                        Color = classification.Color,
+                        IsBossSpecial = classification.IsBossSpecial
+                    };
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Falha ao consultar fallback geral da Google Places API (New).");
+            }
+        }
 
-            return new PlacesLookupResult(true, places);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        if (!anyBatchSucceeded)
         {
-            return new PlacesLookupResult(
-                false,
-                Array.Empty<GamePoiDto>(),
-                "TIMEOUT",
-                "Tempo limite esgotado ao buscar pontos de interesse."
-            );
+            throw new InvalidOperationException("Não foi possível consultar a Google Places API. Verifique se a Places API (New) está ativada e se a chave possui permissão.");
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogWarning(ex, "Network error while calling Google Places API.");
-            return new PlacesLookupResult(
-                false,
-                Array.Empty<GamePoiDto>(),
-                "NETWORK_ERROR",
-                "Erro de rede ao consultar pontos de interesse."
-            );
-        }
+
+        var resultList = mergedById.Values
+            .OrderByDescending(x => x.IsBossSpecial)
+            .ThenBy(x => x.Name)
+            .ToList();
+
+        NearbyCache[cacheKey] = (DateTime.UtcNow.Add(CacheDuration), resultList);
+        return resultList;
     }
 
-    /// <summary>
-    /// Busca progressiva de destinos de transporte da MESMA subcategoria do Place de origem
-    /// (ex.: bus_station -> somente bus_station) via Google Places API Nearby Search (New):
-    /// 1. Raios progressivos 5 km -> 15 km -> 30 km -> 50 km.
-    /// 2. A primeira consulta usa rankPreference = DISTANCE (os mais próximos).
-    /// 3. A Places API (New) devolve no máximo 20 resultados por consulta. Quando uma consulta por
-    ///    DISTANCE vem cheia, ampliar o raio devolveria exatamente os mesmos 20 vizinhos; por isso as
-    ///    consultas seguintes passam a usar POPULARITY, que espalha os resultados pelo círculo inteiro.
-    /// 4. Os destinos são ACUMULADOS (sem descartar os próximos) até existir pelo menos um destino a
-    ///    mais de <see cref="FarTransportDestinationThresholdKm"/> km, ou até esgotar o raio de 50 km.
-    /// 5. Remove o próprio Place de origem e duplicados por ID.
-    /// </summary>
-    public async Task<TransportDestinationsLookupResult> SearchTransportDestinationsAsync(
+    public async Task<(IReadOnlyList<GamePoiDto> Places, double RadiusUsedMeters)> SearchTransportationDestinationsAsync(
         double latitude,
         double longitude,
-        string transportType,
+        string transportSubcategory,
         string? excludePlaceId = null,
         CancellationToken cancellationToken = default)
     {
-        var normalizedType = (transportType ?? string.Empty).Trim().ToLowerInvariant();
-        if (!PlaceCategoryMapper.IsAllowedTransportationSubcategory(normalizedType))
+        var normalizedType = (transportSubcategory ?? string.Empty).Trim().ToLowerInvariant();
+        if (!PlaceCategoryMapper.IsTransportationSubcategory(normalizedType))
         {
-            return new TransportDestinationsLookupResult(
-                false,
-                normalizedType,
-                0,
-                Array.Empty<TransportDestinationDto>(),
-                "INVALID_TRANSPORT_TYPE",
-                $"Subcategoria de transporte inválida ('{normalizedType}'). Utilize uma das 24 subcategorias oficiais de Transportation."
-            );
+            throw new ArgumentException($"Subcategoria de transporte inválida: '{transportSubcategory}'.", nameof(transportSubcategory));
         }
 
-        var apiKey = ResolveApiKey();
+        var apiKey = ResolveGoogleApiKey(_configuration, ["GooglePlaces:ApiKey", "GoogleMaps:ApiKey"], ["GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY", "VITE_GOOGLE_MAPS_API_KEY"]);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return new TransportDestinationsLookupResult(
-                false,
-                normalizedType,
-                0,
-                Array.Empty<TransportDestinationDto>(),
-                "MISSING_API_KEY",
-                "Chave da Google Places API não configurada no servidor."
-            );
+            throw new InvalidOperationException("Chave da API Google Places não configurada.");
         }
 
-        var collectedById = new Dictionary<string, TransportDestinationDto>(StringComparer.OrdinalIgnoreCase);
-        int lastRadiusUsed = ProgressiveTransportRadiiMeters[0];
-        string? lastErrorCode = null;
-        string? lastErrorMessage = null;
-        bool anySuccessfulResponse = false;
-        // Uma vez que uma consulta por DISTANCE vem cheia, DISTANCE em raios maiores repete os mesmos resultados.
-        bool distanceRankingSaturated = false;
+        double[] progressiveRadiiMeters = [5000, 15000, 30000, 50000];
+        var mergedById = new Dictionary<string, GamePoiDto>(StringComparer.Ordinal);
+        double lastRadiusUsed = progressiveRadiiMeters[0];
 
-        foreach (var rawRadius in ProgressiveTransportRadiiMeters)
+        var profile = TransportSearchProfiles.TryGetValue(normalizedType, out var customProfile)
+            ? customProfile
+            : (ApiTypes: [normalizedType], NameKeywords: [normalizedType.Replace('_', ' ')]);
+
+        foreach (var radius in progressiveRadiiMeters)
         {
-            int radiusMeters = Math.Clamp(rawRadius, 100, MaxAllowedRadiusMeters);
-            lastRadiusUsed = radiusMeters;
-            var rankPreference = distanceRankingSaturated ? "POPULARITY" : "DISTANCE";
+            lastRadiusUsed = radius;
+            var batchCandidates = new List<GooglePlaceItem>();
 
-            var stepResult = await QueryNearbyTransportPlacesNewAsync(
-                latitude,
-                longitude,
-                radiusMeters,
-                normalizedType,
-                rankPreference,
-                apiKey,
-                cancellationToken);
-
-            if (stepResult.Success && rankPreference == "DISTANCE" && stepResult.RawCount >= MaxPlacesNewQueryCount)
+            try
             {
-                distanceRankingSaturated = true;
+                var exactPlaces = await ExecuteNearbyBatchAsync(apiKey, latitude, longitude, radius, [normalizedType], cancellationToken, rankPreference: "DISTANCE");
+                batchCandidates.AddRange(exactPlaces);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Busca exata de transporte ({Subcategory}) falhou no raio {Radius}m.", normalizedType, radius);
             }
 
-            if (!stepResult.Success)
+            foreach (var candidate in batchCandidates)
             {
-                // Fallback compatível para a API legada caso a chave não tenha Places API (New) habilitada
-                stepResult = await QueryNearbyTransportPlacesLegacyAsync(
-                    latitude,
-                    longitude,
-                    radiusMeters,
-                    normalizedType,
-                    apiKey,
-                    cancellationToken);
-            }
+                if (string.IsNullOrWhiteSpace(candidate.Id) || candidate.Location == null)
+                    continue;
 
-            if (stepResult.Success)
-            {
-                anySuccessfulResponse = true;
-                foreach (var candidate in stepResult.Candidates)
+                if (!string.IsNullOrWhiteSpace(excludePlaceId) &&
+                    string.Equals(candidate.Id, excludePlaceId, StringComparison.Ordinal))
+                    continue;
+
+                if (CalculateHaversineKm(latitude, longitude, candidate.Location.Latitude, candidate.Location.Longitude) < 0.03)
+                    continue;
+
+                if (!MatchesExactTransportationSubcategory(candidate, normalizedType))
+                    continue;
+
+                mergedById[candidate.Id] = new GamePoiDto
                 {
-                    if (IsSameOriginPlace(candidate.Id, candidate.Latitude, candidate.Longitude, excludePlaceId, latitude, longitude))
+                    Id = candidate.Id,
+                    Name = string.IsNullOrWhiteSpace(candidate.DisplayName?.Text) ? "Ponto de Transporte" : candidate.DisplayName!.Text!,
+                    Lat = candidate.Location.Latitude,
+                    Lng = candidate.Location.Longitude,
+                    Category = PlaceCategoryMapper.Transportation,
+                    Subcategory = normalizedType,
+                    Color = "#3B82F6",
+                    IsBossSpecial = false
+                };
+            }
+
+            if (mergedById.Count == 0 && profile.ApiTypes.Length > 1)
+            {
+                try
+                {
+                    var relatedPlaces = await ExecuteNearbyBatchAsync(apiKey, latitude, longitude, radius, profile.ApiTypes, cancellationToken, rankPreference: "DISTANCE");
+                    foreach (var candidate in relatedPlaces)
                     {
-                        continue;
+                        if (string.IsNullOrWhiteSpace(candidate.Id) || candidate.Location == null)
+                            continue;
+
+                        if (!string.IsNullOrWhiteSpace(excludePlaceId) &&
+                            string.Equals(candidate.Id, excludePlaceId, StringComparison.Ordinal))
+                            continue;
+
+                        if (CalculateHaversineKm(latitude, longitude, candidate.Location.Latitude, candidate.Location.Longitude) < 0.03)
+                            continue;
+
+                        if (!MatchesExactTransportationSubcategory(candidate, normalizedType))
+                            continue;
+
+                        mergedById[candidate.Id] = new GamePoiDto
+                        {
+                            Id = candidate.Id,
+                            Name = string.IsNullOrWhiteSpace(candidate.DisplayName?.Text) ? "Ponto de Transporte" : candidate.DisplayName!.Text!,
+                            Lat = candidate.Location.Latitude,
+                            Lng = candidate.Location.Longitude,
+                            Category = PlaceCategoryMapper.Transportation,
+                            Subcategory = normalizedType,
+                            Color = "#3B82F6",
+                            IsBossSpecial = false
+                        };
                     }
-
-                    if (!MatchesTransportType(candidate.Subcategory, candidate.Types, normalizedType))
-                    {
-                        continue;
-                    }
-
-                    double distKm = Math.Round(
-                        CalculateHaversineKm(latitude, longitude, candidate.Latitude, candidate.Longitude),
-                        3);
-
-                    if (distKm <= 0.015)
-                    {
-                        continue;
-                    }
-
-                    int costCoins = CalculateTransportCostCoins(distKm);
-
-                    collectedById[candidate.Id] = new TransportDestinationDto(
-                        Id: candidate.Id,
-                        Name: candidate.Name,
-                        Latitude: candidate.Latitude,
-                        Longitude: candidate.Longitude,
-                        Category: PlaceCategoryMapper.CategoryTransportation,
-                        Subcategory: normalizedType,
-                        DistanceKm: distKm,
-                        TravelCostCoins: costCoins,
-                        Address: candidate.Address
-                    );
                 }
-
-                if (collectedById.Values.Any(d => d.DistanceKm > FarTransportDestinationThresholdKm))
+                catch (Exception ex)
                 {
-                    break;
+                    _logger.LogWarning(ex, "Busca de tipos relacionados para transporte ({Subcategory}) falhou no raio {Radius}m.", normalizedType, radius);
                 }
             }
-            else
+
+            if (mergedById.Count == 0)
             {
-                lastErrorCode = stepResult.ErrorCode;
-                lastErrorMessage = stepResult.ErrorMessage;
+                try
+                {
+                    var legacyPlaces = await ExecuteLegacyNearbyTransportSearchAsync(
+                        apiKey,
+                        latitude,
+                        longitude,
+                        radius,
+                        normalizedType,
+                        profile.NameKeywords.FirstOrDefault() ?? normalizedType.Replace('_', ' '),
+                        cancellationToken);
+
+                    foreach (var legacy in legacyPlaces)
+                    {
+                        if (string.IsNullOrWhiteSpace(legacy.Id))
+                            continue;
+
+                        if (!string.IsNullOrWhiteSpace(excludePlaceId) &&
+                            string.Equals(legacy.Id, excludePlaceId, StringComparison.Ordinal))
+                            continue;
+
+                        if (CalculateHaversineKm(latitude, longitude, legacy.Lat, legacy.Lng) < 0.03)
+                            continue;
+
+                        mergedById[legacy.Id] = legacy;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Busca legada de transporte ({Subcategory}) falhou no raio {Radius}m.", normalizedType, radius);
+                }
             }
+
+            if (mergedById.Count >= 3)
+                break;
         }
 
-        if (!anySuccessfulResponse && collectedById.Count == 0)
-        {
-            return new TransportDestinationsLookupResult(
-                false,
-                normalizedType,
-                lastRadiusUsed,
-                Array.Empty<TransportDestinationDto>(),
-                lastErrorCode ?? "PLACES_ERROR",
-                lastErrorMessage ?? "Não foi possível consultar destinos de transporte."
-            );
-        }
-
-        // Sem corte por quantidade: cortar pelos N mais próximos descartaria justamente os destinos distantes.
-        var ordered = collectedById.Values
-            .OrderBy(d => d.DistanceKm)
+        var ordered = mergedById.Values
+            .OrderBy(p => CalculateHaversineKm(latitude, longitude, p.Lat, p.Lng))
             .ToList();
 
-        return new TransportDestinationsLookupResult(
-            true,
-            normalizedType,
-            lastRadiusUsed,
-            ordered
-        );
+        return (ordered, lastRadiusUsed);
     }
 
-    public static int CalculateTransportCostCoins(double distanceKm)
+    private static bool MatchesExactTransportationSubcategory(GooglePlaceItem place, string targetSubcategory)
     {
-        if (distanceKm <= 0 || double.IsNaN(distanceKm) || double.IsInfinity(distanceKm))
-        {
-            return 0;
-        }
-
-        // Regra 5.5: distancia_km * 10 convertido em moedas (g), sem modificador de velocidade.
-        // Convenção de arredondamento documentada: Math.Round(valor, MidpointRounding.AwayFromZero), mínimo de 1g para viagens > 0 km.
-        return Math.Max(1, (int)Math.Round(distanceKm * 10.0, MidpointRounding.AwayFromZero));
-    }
-
-    public static double CalculateHaversineKm(double lat1, double lon1, double lat2, double lon2)
-    {
-        const double R = 6371.0;
-        double dLat = (lat2 - lat1) * Math.PI / 180.0;
-        double dLon = (lon2 - lon1) * Math.PI / 180.0;
-        double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
-                   Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0) *
-                   Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-        double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-        return R * c;
-    }
-
-    private async Task<(bool Success, List<GamePoiDto> Candidates, int RawCount, string? ErrorCode, string? ErrorMessage)>
-        QueryNearbyTransportPlacesNewAsync(
-            double latitude,
-            double longitude,
-            int radiusMeters,
-            string transportType,
-            string rankPreference,
-            string apiKey,
-            CancellationToken cancellationToken)
-    {
-        const string url = "https://places.googleapis.com/v1/places:searchNearby";
-        var payload = new
-        {
-            includedTypes = new[] { transportType },
-            maxResultCount = MaxPlacesNewQueryCount,
-            rankPreference,
-            languageCode = "pt-BR",
-            locationRestriction = new
-            {
-                circle = new
-                {
-                    center = new
-                    {
-                        latitude,
-                        longitude
-                    },
-                    radius = (double)Math.Clamp(radiusMeters, 100, MaxAllowedRadiusMeters)
-                }
-            }
-        };
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, url)
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-            };
-            request.Headers.TryAddWithoutValidation("X-Goog-Api-Key", apiKey);
-            request.Headers.TryAddWithoutValidation(
-                "X-Goog-FieldMask",
-                "places.id,places.displayName,places.location,places.primaryType,places.types,places.formattedAddress"
-            );
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                return (false, new List<GamePoiDto>(), 0, $"HTTP_{(int)response.StatusCode}", "Places API (New) indisponível.");
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = doc.RootElement;
-
-            var list = new List<GamePoiDto>();
-            var rawCount = 0;
-            if (root.TryGetProperty("places", out var placesEl) && placesEl.ValueKind == JsonValueKind.Array)
-            {
-                rawCount = placesEl.GetArrayLength();
-                foreach (var item in placesEl.EnumerateArray())
-                {
-                    var parsed = ParsePlaceNewItem(item, transportType);
-                    if (parsed is not null)
-                    {
-                        list.Add(parsed);
-                    }
-                }
-            }
-
-            return (true, list, rawCount, null, null);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogDebug(ex, "Places API (New) fallback acionado.");
-            return (false, new List<GamePoiDto>(), 0, "PLACES_NEW_ERROR", ex.Message);
-        }
-    }
-
-    private async Task<(bool Success, List<GamePoiDto> Candidates, int RawCount, string? ErrorCode, string? ErrorMessage)>
-        QueryNearbyTransportPlacesLegacyAsync(
-            double latitude,
-            double longitude,
-            int radiusMeters,
-            string transportType,
-            string apiKey,
-            CancellationToken cancellationToken)
-    {
-        var latStr = latitude.ToString(CultureInfo.InvariantCulture);
-        var lngStr = longitude.ToString(CultureInfo.InvariantCulture);
-        var clampedRadius = Math.Clamp(radiusMeters, 100, MaxAllowedRadiusMeters);
-        var url = $"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={latStr},{lngStr}&radius={clampedRadius}&type={Uri.EscapeDataString(transportType)}&language=pt-BR&key={Uri.EscapeDataString(apiKey)}";
-
-        try
-        {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                return (false, new List<GamePoiDto>(), 0, "UPSTREAM_HTTP_ERROR", "Falha ao consultar Google Places.");
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = doc.RootElement;
-
-            var status = root.TryGetProperty("status", out var statusProp)
-                ? statusProp.GetString()
-                : "UNKNOWN_ERROR";
-
-            if (status == "ZERO_RESULTS")
-            {
-                return (true, new List<GamePoiDto>(), 0, null, null);
-            }
-
-            if (status != "OK")
-            {
-                return (false, new List<GamePoiDto>(), 0, status, $"Google Places retornou status: {status}");
-            }
-
-            var list = new List<GamePoiDto>();
-            var rawCount = 0;
-            if (root.TryGetProperty("results", out var resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
-            {
-                rawCount = resultsProp.GetArrayLength();
-                foreach (var item in resultsProp.EnumerateArray())
-                {
-                    var parsed = ParsePlaceItem(item);
-                    if (parsed is not null)
-                    {
-                        list.Add(parsed);
-                    }
-                }
-            }
-
-            return (true, list, rawCount, null, null);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            return (false, new List<GamePoiDto>(), 0, "NETWORK_ERROR", ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Converte um item da Places API (New). Quando <paramref name="expectedTransportType"/> é informado,
-    /// só aceita Places de Transportation daquela subcategoria exata.
-    /// </summary>
-    private GamePoiDto? ParsePlaceNewItem(JsonElement item, string? expectedTransportType)
-    {
-        if (!item.TryGetProperty("location", out var location) ||
-            !location.TryGetProperty("latitude", out var latEl) ||
-            !location.TryGetProperty("longitude", out var lngEl) ||
-            !latEl.TryGetDouble(out var lat) ||
-            !lngEl.TryGetDouble(out var lng))
-        {
-            return null;
-        }
-
-        var id = item.TryGetProperty("id", out var idEl) && !string.IsNullOrWhiteSpace(idEl.GetString())
-            ? idEl.GetString()!
-            : $"{lat.ToString(CultureInfo.InvariantCulture)},{lng.ToString(CultureInfo.InvariantCulture)}";
-
-        string name = expectedTransportType is null ? "Local sem nome" : "Terminal de Transporte";
-        if (item.TryGetProperty("displayName", out var displayNameEl))
-        {
-            if (displayNameEl.ValueKind == JsonValueKind.Object &&
-                displayNameEl.TryGetProperty("text", out var textEl) &&
-                !string.IsNullOrWhiteSpace(textEl.GetString()))
-            {
-                name = textEl.GetString()!;
-            }
-            else if (displayNameEl.ValueKind == JsonValueKind.String &&
-                     !string.IsNullOrWhiteSpace(displayNameEl.GetString()))
-            {
-                name = displayNameEl.GetString()!;
-            }
-        }
-
-        var rawTypes = new List<string>();
-        if (item.TryGetProperty("types", out var typesEl) && typesEl.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var t in typesEl.EnumerateArray())
-            {
-                var str = t.GetString();
-                if (!string.IsNullOrWhiteSpace(str))
-                {
-                    rawTypes.Add(str);
-                }
-            }
-        }
-
-        string? primaryType = item.TryGetProperty("primaryType", out var ptEl) && ptEl.ValueKind == JsonValueKind.String
-            ? ptEl.GetString()
-            : null;
-
-        var classification = _categoryMapper.ClassifyPlace(primaryType, rawTypes);
-        if (classification is null)
-        {
-            return null;
-        }
-
-        if (expectedTransportType is not null &&
-            (!string.Equals(classification.Category, PlaceCategoryMapper.CategoryTransportation, StringComparison.OrdinalIgnoreCase) ||
-             !string.Equals(classification.Subcategory, expectedTransportType, StringComparison.OrdinalIgnoreCase)))
-        {
-            return null;
-        }
-
-        var address = item.TryGetProperty("formattedAddress", out var addrEl) ? addrEl.GetString() : null;
-
-        return new GamePoiDto(
-            id,
-            name,
-            lat,
-            lng,
-            classification.Category,
-            classification.Subcategory,
-            classification.Subcategory,
-            classification.PlaceFunction,
-            classification.IsBossSpecial,
-            classification.InteractionHint,
-            classification.ActionLabel,
-            address,
-            rawTypes
-        );
-    }
-
-    private static bool IsSameOriginPlace(
-        string candidateId,
-        double candidateLat,
-        double candidateLng,
-        string? excludePlaceId,
-        double originLat,
-        double originLng)
-    {
-        if (!string.IsNullOrWhiteSpace(excludePlaceId) &&
-            string.Equals(candidateId, excludePlaceId.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(place.PrimaryType) &&
+            string.Equals(place.PrimaryType.Trim(), targetSubcategory, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        return CalculateHaversineKm(originLat, originLng, candidateLat, candidateLng) < 0.015;
-    }
-
-    private static bool MatchesTransportType(
-        string subcategory,
-        IReadOnlyList<string>? rawTypes,
-        string expectedTransportType)
-    {
-        return string.Equals(subcategory, expectedTransportType, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private GamePoiDto? ParsePlaceItem(JsonElement item)
-    {
-        if (!item.TryGetProperty("geometry", out var geometry) ||
-            !geometry.TryGetProperty("location", out var location))
+        if (place.Types != null &&
+            place.Types.Any(t => string.Equals(t?.Trim(), targetSubcategory, StringComparison.OrdinalIgnoreCase)))
         {
-            return null;
+            return true;
         }
 
-        if (!location.TryGetProperty("lat", out var latEl) ||
-            !location.TryGetProperty("lng", out var lngEl) ||
-            !latEl.TryGetDouble(out var lat) ||
-            !lngEl.TryGetDouble(out var lng))
+        var classification = PlaceCategoryMapper.ClassifyPlace(place.PrimaryType, place.Types);
+        return classification != null &&
+            string.Equals(classification.Category, PlaceCategoryMapper.Transportation, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(classification.Subcategory, targetSubcategory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<List<GamePoiDto>> ExecuteLegacyNearbyTransportSearchAsync(
+        string apiKey,
+        double latitude,
+        double longitude,
+        double radiusMeters,
+        string targetSubcategory,
+        string keyword,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<GamePoiDto>();
+        var url = string.Format(
+            CultureInfo.InvariantCulture,
+            "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={0},{1}&radius={2}&type={3}&keyword={4}&key={5}",
+            latitude,
+            longitude,
+            Math.Clamp(Math.Round(radiusMeters), 100, 50000),
+            Uri.EscapeDataString(targetSubcategory),
+            Uri.EscapeDataString(keyword),
+            Uri.EscapeDataString(apiKey));
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return results;
+
+        var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var doc = JsonDocument.Parse(rawJson);
+
+        if (!doc.RootElement.TryGetProperty("results", out var resultsArray) ||
+            resultsArray.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return results;
         }
 
-        var id = item.TryGetProperty("place_id", out var idEl) && !string.IsNullOrWhiteSpace(idEl.GetString())
-            ? idEl.GetString()!
-            : $"{lat.ToString(CultureInfo.InvariantCulture)},{lng.ToString(CultureInfo.InvariantCulture)}";
-
-        var name = item.TryGetProperty("name", out var nameEl) && !string.IsNullOrWhiteSpace(nameEl.GetString())
-            ? nameEl.GetString()!
-            : "Local sem nome";
-
-        var rawTypes = new List<string>();
-        if (item.TryGetProperty("types", out var typesEl) && typesEl.ValueKind == JsonValueKind.Array)
+        foreach (var item in resultsArray.EnumerateArray())
         {
-            foreach (var t in typesEl.EnumerateArray())
+            var placeId = item.TryGetProperty("place_id", out var pidProp) ? pidProp.GetString() : null;
+            var name = item.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(placeId))
+                continue;
+
+            if (!item.TryGetProperty("geometry", out var geom) ||
+                !geom.TryGetProperty("location", out var loc))
+                continue;
+
+            var lat = loc.TryGetProperty("lat", out var latProp) ? latProp.GetDouble() : double.NaN;
+            var lng = loc.TryGetProperty("lng", out var lngProp) ? lngProp.GetDouble() : double.NaN;
+            if (double.IsNaN(lat) || double.IsNaN(lng))
+                continue;
+
+            var itemTypes = new List<string>();
+            if (item.TryGetProperty("types", out var typesArr) && typesArr.ValueKind == JsonValueKind.Array)
             {
-                var str = t.GetString();
-                if (!string.IsNullOrWhiteSpace(str))
+                foreach (var t in typesArr.EnumerateArray())
                 {
-                    rawTypes.Add(str);
+                    var ts = t.GetString();
+                    if (!string.IsNullOrWhiteSpace(ts))
+                        itemTypes.Add(ts.Trim());
+                }
+            }
+
+            if (!itemTypes.Any(t => string.Equals(t, targetSubcategory, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            results.Add(new GamePoiDto
+            {
+                Id = placeId,
+                Name = string.IsNullOrWhiteSpace(name) ? "Ponto de Transporte" : name!,
+                Lat = lat,
+                Lng = lng,
+                Category = PlaceCategoryMapper.Transportation,
+                Subcategory = targetSubcategory,
+                Color = "#3B82F6",
+                IsBossSpecial = false
+            });
+        }
+
+        return results;
+    }
+
+    public static double CalculateHaversineKm(double lat1, double lng1, double lat2, double lng2)
+    {
+        const double earthRadiusKm = 6371.0;
+        double dLat = (lat2 - lat1) * Math.PI / 180.0;
+        double dLng = (lng2 - lng1) * Math.PI / 180.0;
+        double a =
+            Math.Sin(dLat / 2.0) * Math.Sin(dLat / 2.0) +
+            Math.Cos(lat1 * Math.PI / 180.0) *
+            Math.Cos(lat2 * Math.PI / 180.0) *
+            Math.Sin(dLng / 2.0) *
+            Math.Sin(dLng / 2.0);
+        double c = 2.0 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1.0 - a));
+        return earthRadiusKm * c;
+    }
+
+    private async Task<List<GooglePlaceItem>> ExecuteNearbyBatchAsync(
+        string apiKey,
+        double latitude,
+        double longitude,
+        double radiusMeters,
+        string[]? includedTypes,
+        CancellationToken cancellationToken,
+        string rankPreference = "POPULARITY")
+    {
+        var payload = new GoogleNearbyRequest
+        {
+            IncludedTypes = includedTypes is { Length: > 0 } ? includedTypes : null,
+            MaxResultCount = 20,
+            RankPreference = rankPreference,
+            LocationRestriction = new GoogleLocationRestriction
+            {
+                Circle = new GoogleCircle
+                {
+                    Center = new GoogleLatLng { Latitude = latitude, Longitude = longitude },
+                    Radius = radiusMeters
+                }
+            }
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, PlacesNearbyUrl);
+        request.Headers.Add("X-Goog-Api-Key", apiKey);
+        request.Headers.Add("X-Goog-FieldMask", FieldMask);
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload, JsonOptions),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var rawBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"Google Places API retornou {(int)response.StatusCode}: {rawBody}");
+        }
+
+        var parsed = JsonSerializer.Deserialize<GoogleNearbyResponse>(rawBody, JsonOptions);
+        return parsed?.Places ?? [];
+    }
+
+    public static string? ResolveGoogleApiKey(
+        IConfiguration configuration,
+        string[] configKeys,
+        string[] envAndDotEnvKeys)
+    {
+        foreach (var ck in configKeys)
+        {
+            var val = configuration[ck];
+            if (IsValidKey(val))
+                return val!.Trim();
+        }
+
+        foreach (var ek in envAndDotEnvKeys)
+        {
+            var val = Environment.GetEnvironmentVariable(ek);
+            if (IsValidKey(val))
+                return val!.Trim();
+        }
+
+        return TryReadKeyFromFrontendDotEnv(envAndDotEnvKeys);
+    }
+
+    private static bool IsValidKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        return !trimmed.Contains("SUA_CHAVE", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.Contains("YOUR_API_KEY", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryReadKeyFromFrontendDotEnv(string[] acceptedKeys)
+    {
+        try
+        {
+            var baseDir = Directory.GetCurrentDirectory();
+            var candidates = new[]
+            {
+                Path.Combine(baseDir, "..", "Frontend", ".env"),
+                Path.Combine(baseDir, "..", "Frontend", ".env.local"),
+                Path.Combine(baseDir, ".env")
+            };
+
+            foreach (var path in candidates)
+            {
+                if (!File.Exists(path))
+                    continue;
+
+                foreach (var line in File.ReadAllLines(path))
+                {
+                    var trimmed = line.Trim();
+                    if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#'))
+                        continue;
+
+                    foreach (var keyName in acceptedKeys)
+                    {
+                        var prefix = keyName + "=";
+                        if (trimmed.StartsWith(prefix, StringComparison.Ordinal))
+                        {
+                            var val = trimmed[prefix.Length..].Trim().Trim('"', '\'');
+                            if (IsValidKey(val))
+                                return val;
+                        }
+                    }
                 }
             }
         }
-
-        string? primaryType = null;
-        if (item.TryGetProperty("primaryType", out var primaryTypeEl) && primaryTypeEl.ValueKind == JsonValueKind.String)
+        catch
         {
-            primaryType = primaryTypeEl.GetString();
-        }
-        else if (item.TryGetProperty("primary_type", out var primaryTypeSnakeEl) && primaryTypeSnakeEl.ValueKind == JsonValueKind.String)
-        {
-            primaryType = primaryTypeSnakeEl.GetString();
-        }
-
-        var classification = _categoryMapper.ClassifyPlace(primaryType, rawTypes);
-        if (classification is null)
-        {
-            return null;
-        }
-
-        var address = item.TryGetProperty("vicinity", out var vicinityEl) ? vicinityEl.GetString() : null;
-
-        return new GamePoiDto(
-            id,
-            name,
-            lat,
-            lng,
-            classification.Category,
-            classification.Subcategory,
-            classification.Subcategory,
-            classification.PlaceFunction,
-            classification.IsBossSpecial,
-            classification.InteractionHint,
-            classification.ActionLabel,
-            address,
-            rawTypes
-        );
-    }
-
-    private string? ResolveApiKey()
-    {
-        // appsettings.json ships with "ApiKey": "" — empty strings must not stop the fallback chain.
-        var candidates = new Func<string?>[]
-        {
-            () => _configuration["GoogleMaps:ApiKey"],
-            () => Environment.GetEnvironmentVariable("GOOGLE_MAPS_API_KEY"),
-            () => Environment.GetEnvironmentVariable("VITE_GOOGLE_MAPS_API_KEY"),
-            () => TryReadKeyFromFrontendDotEnv("VITE_GOOGLE_MAPS_API_KEY"),
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var value = candidate();
-            if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
         }
 
         return null;
     }
 
-    private static string? TryReadKeyFromFrontendDotEnv(string variableName)
+    private sealed class GoogleNearbyRequest
     {
-        var candidatePaths = new[]
-        {
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "Frontend", ".env"),
-            Path.Combine(Directory.GetCurrentDirectory(), "Frontend", ".env"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Frontend", ".env")
-        };
+        public string[]? IncludedTypes { get; set; }
+        public int MaxResultCount { get; set; }
+        public string RankPreference { get; set; } = "POPULARITY";
+        public GoogleLocationRestriction LocationRestriction { get; set; } = new();
+    }
 
-        foreach (var path in candidatePaths)
-        {
-            if (!File.Exists(path)) continue;
+    private sealed class GoogleLocationRestriction
+    {
+        public GoogleCircle Circle { get; set; } = new();
+    }
 
-            foreach (var rawLine in File.ReadAllLines(path))
-            {
-                var line = rawLine.Trim();
-                if (string.IsNullOrEmpty(line) || line.StartsWith('#')) continue;
+    private sealed class GoogleCircle
+    {
+        public GoogleLatLng Center { get; set; } = new();
+        public double Radius { get; set; }
+    }
 
-                var sepIndex = line.IndexOf('=');
-                if (sepIndex <= 0) continue;
+    private sealed class GoogleLatLng
+    {
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+    }
 
-                var key = line[..sepIndex].Trim();
-                var value = line[(sepIndex + 1)..].Trim().Trim('"', '\'');
+    private sealed class GoogleNearbyResponse
+    {
+        public List<GooglePlaceItem>? Places { get; set; }
+    }
 
-                if (string.Equals(key, variableName, StringComparison.Ordinal) &&
-                    !string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-        }
+    private sealed class GooglePlaceItem
+    {
+        public string? Id { get; set; }
+        public GoogleDisplayName? DisplayName { get; set; }
+        public GoogleLatLng? Location { get; set; }
+        public List<string>? Types { get; set; }
+        public string? PrimaryType { get; set; }
+    }
 
-        return null;
+    private sealed class GoogleDisplayName
+    {
+        public string? Text { get; set; }
     }
 }

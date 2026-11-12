@@ -172,7 +172,6 @@ export default function PlayerStatsModal({ playerState, onClose }) {
           ))}
         </div>
 
-        {/* Checkpoints Persistidos (Seção 4 e Seção 9) */}
         <section
           style={{
             background: "#18201A",
@@ -257,7 +256,6 @@ export default function PlayerStatsModal({ playerState, onClose }) {
           </div>
         </section>
 
-        {/* Histórico dos últimos 10 locais por categoria (Seção 5) */}
         <section
           style={{
             background: "#18201A",

@@ -86,7 +86,6 @@ export default function PlaceArrivalModal({
   const [isBusy, setIsBusy] = useState(false);
   const [prevContextKey, setPrevContextKey] = useState(null);
 
-  // Estados locais por interação com o Place (Natural Features, Culture, Sports, Services)
   const [interactionId, setInteractionId] = useState(() =>
     createInteractionId(place?.id),
   );
@@ -108,7 +107,6 @@ export default function PlaceArrivalModal({
     if (servicesBuffSpec !== null) setServicesBuffSpec(null);
   }
 
-  // Seção 4: Quando selecionar um Place com a categoria Services, escolher de forma aleatória qual atributo será melhorado e salvar para esse Place.
   useEffect(() => {
     let active = true;
     if (!place || place.category !== ALLOWED_CATEGORIES.SERVICES) {
@@ -124,9 +122,7 @@ export default function PlaceArrivalModal({
         if (parsed?.atributo) {
           return undefined;
         }
-      } catch {
-        // Ignora JSON inválido
-      }
+      } catch { void 0; }
     }
 
     if (typeof onEnsureServicesAttribute === "function") {
@@ -137,7 +133,7 @@ export default function PlaceArrivalModal({
           }
         })
         .catch(() => {
-          // Mantém fallback visual caso ocorra falha transitória
+
         });
     }
     return () => {
@@ -213,14 +209,12 @@ export default function PlaceArrivalModal({
     place.category,
   );
 
-  // Estado permanente persistido para este Place
   const permanentState = (playerState?.estadosPlaces || []).find(
     (e) => e.placeId === place.id,
   );
   const isPlaceCompleted = Boolean(permanentState?.concluido);
   const isFreeHealUsed = Boolean(permanentState?.curaGratuitaUtilizada);
 
-  // Em Sports, recupera qual melhoria foi escolhida e persistida no SQLite/estado permanente
   let persistedSportsUpgradeLabel = null;
   if (isSports) {
     if (permanentState?.estoqueJson) {
@@ -236,9 +230,7 @@ export default function PlaceArrivalModal({
             persistedSportsUpgradeLabel = `${foundOpt.label} (${foundOpt.detail})`;
           }
         }
-      } catch {
-        // Ignora caso estoqueJson não seja JSON estruturado
-      }
+      } catch { void 0; }
     }
     if (!persistedSportsUpgradeLabel && sportsTrainedOption) {
       const foundOpt = SPORTS_UPGRADE_OPTIONS.find(
@@ -252,7 +244,6 @@ export default function PlaceArrivalModal({
   const isSportsCompleted =
     isSports && (isPlaceCompleted || sportsTrainedOption !== null);
 
-  // Em Services, recupera qual atributo foi sorteado e persistido para este Place
   let resolvedServicesSpec = servicesBuffSpec;
   if (isServicesBuffShop && !resolvedServicesSpec && permanentState?.estoqueJson) {
     try {
@@ -260,12 +251,9 @@ export default function PlaceArrivalModal({
       if (parsed?.atributo) {
         resolvedServicesSpec = obterEspecificacaoBuff(parsed.atributo, "services");
       }
-    } catch {
-      // Ignora JSON inválido
-    }
+    } catch { void 0; }
   }
 
-  // Em Culture, recupera resultado persistido ou da sessão atual
   let resolvedCultureSpec = null;
   if (isCulture) {
     if (cultureBuffResult?.atributo) {
@@ -276,9 +264,7 @@ export default function PlaceArrivalModal({
         if (parsed?.atributo) {
           resolvedCultureSpec = obterEspecificacaoBuff(parsed.atributo, "culture");
         }
-      } catch {
-        // Ignora JSON inválido
-      }
+      } catch { void 0; }
     }
   }
   const isCultureCompleted =
@@ -295,8 +281,6 @@ export default function PlaceArrivalModal({
   );
   const moedas = playerState?.moedas ?? playerState?.atributos?.moedas ?? 0;
 
-  // Seção 4.3: Em Natural Features, após vasculhar, a descrição inicial é substituída pelo texto narrativo de resultado
-  // Seção 5: Em Culture, a descrição é "Espaço cultural que inspira o explorador e concede um aprimoramento cultural temporário (buff). (5 min)"
   const descriptionText = isHomeSpecial
     ? "Seu ponto inicial de aventura."
     : isBossSpecial
@@ -406,7 +390,6 @@ export default function PlaceArrivalModal({
     }
   }
 
-  // Seção 4: Services — Compra de buff temporário (50g, 10 minutos, permite compras repetidas)
   async function handleBuyServicesBuff() {
     if (!hasArrived || isBusy || !onBuyServicesBuff) return;
     setActionError(null);
@@ -431,7 +414,6 @@ export default function PlaceArrivalModal({
     }
   }
 
-  // Seção 4: Natural Features — Vasculhar local (calculado e persistido no backend)
   async function handleScavengeNaturalFeature() {
     if (
       !hasArrived ||
@@ -456,7 +438,6 @@ export default function PlaceArrivalModal({
     }
   }
 
-  // Seção 5: Transportation — Abrir mapa alternativo de transporte
   function handleOpenTransportMode() {
     if (!hasArrived || isBusy || !onOpenTransportMap) return;
     setActionError(null);
@@ -464,7 +445,6 @@ export default function PlaceArrivalModal({
     onOpenTransportMap(place);
   }
 
-  // Seção 5: Culture — Receber aprimoramento temporário gratuito (5 min, 1 vez por Place)
   async function handleReceiveCultureBuff() {
     if (!hasArrived || isBusy || isCultureCompleted || !onReceiveCultureBuff) {
       return;
@@ -488,7 +468,6 @@ export default function PlaceArrivalModal({
     }
   }
 
-  // Seção 7: Sports — Treinar 1 atributo permanente uma única vez por Place
   async function handleSelectSportsUpgrade(optionKey) {
     if (
       !hasArrived ||
@@ -618,7 +597,6 @@ export default function PlaceArrivalModal({
           ✕
         </button>
 
-        {/* 1. Nome original do Place */}
         <h3
           id="place-modal-title"
           data-testid="place-menu-name"
@@ -633,7 +611,6 @@ export default function PlaceArrivalModal({
           {place.name}
         </h3>
 
-        {/* Nome traduzido e simplificado da subcategoria em tamanho menor (sem expor identificador técnico) */}
         {!isHomeSpecial && translatedSubcategory && (
           <div
             data-testid="place-menu-subcategory"
@@ -649,7 +626,6 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* 2. Categoria e badges especiais */}
         <div
           style={{
             display: "flex",
@@ -757,7 +733,6 @@ export default function PlaceArrivalModal({
           )}
         </div>
 
-        {/* 3. Descrição / Flavor / Resultado Narrativo */}
         <div
           data-testid="place-menu-description"
           style={{
@@ -775,7 +750,6 @@ export default function PlaceArrivalModal({
           {descriptionText}
         </div>
 
-        {/* Seção 4: Painel para Services (Compra de Buff temporário no Place) */}
         {isServicesBuffShop && (
           <div
             data-testid="services-status-panel"
@@ -819,7 +793,6 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* Seção 4.3: Apresentação visual do resultado da exploração em Natural Features */}
         {isNaturalFeature && naturalExplorationResult && (
           <div
             data-testid="natural-feature-result-panel"
@@ -855,7 +828,7 @@ export default function PlaceArrivalModal({
                 >
                   Item Encontrado!
                 </span>
-                {/* Quadrado destacado na tela preparado para receber futuramente os assets dos itens */}
+
                 <div
                   data-testid="natural-feature-item-box"
                   style={{
@@ -944,7 +917,6 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* Seção 5: Visualização de aprimoramento adquirido em Culture */}
         {isCulture && isCultureCompleted && resolvedCultureSpec && (
           <div
             data-testid="culture-buff-result-panel"
@@ -976,7 +948,6 @@ export default function PlaceArrivalModal({
                 : "Aprimoramento Adquirido (5 min)"}
             </span>
 
-            {/* Quadrado destacado para o ícone do aprimoramento */}
             <div
               data-testid="culture-buff-empty-square"
               style={{
@@ -1057,7 +1028,6 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* Seção 7: Painel informativo de atributos atuais em Sports */}
         {isSports && (
           <div
             data-testid="sports-status-panel"
@@ -1092,7 +1062,6 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* Informações adicionais de estado para Health and Wellness, Lodging, Home ou Locais Concluídos */}
         {isHospital && (
           <div
             data-testid="hospital-status-panel"
@@ -1262,7 +1231,6 @@ export default function PlaceArrivalModal({
           </div>
         )}
 
-        {/* 4. Botões na parte inferior */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button
             type="button"
@@ -1295,7 +1263,6 @@ export default function PlaceArrivalModal({
             {goButtonLabel}
           </button>
 
-          {/* Ações específicas de Health and Wellness */}
           {isHospital ? (
             <>
               <button
@@ -1353,7 +1320,7 @@ export default function PlaceArrivalModal({
               </button>
             </>
           ) : isLodging ? (
-            /* Ação específica de Lodging */
+
             <button
               type="button"
               data-testid="place-action-lodging-rest"
@@ -1380,7 +1347,7 @@ export default function PlaceArrivalModal({
               DESCANSAR (100% ENERGIA • 25 MOEDAS)
             </button>
           ) : isHomeSpecial ? (
-            /* Ação específica de Home */
+
             <button
               type="button"
               data-testid="place-action-home-rest"
@@ -1407,7 +1374,7 @@ export default function PlaceArrivalModal({
               DESCANSAR GRATUITAMENTE
             </button>
           ) : isServicesBuffShop ? (
-            /* Seção 3.3: Services — Loja de buffs (50g, estado WIP) */
+
             <button
               type="button"
               data-testid="place-action-services-buff"
@@ -1434,7 +1401,7 @@ export default function PlaceArrivalModal({
               COMPRAR APRIMORAMENTO TEMPORÁRIO (50g)
             </button>
           ) : isNaturalFeature ? (
-            /* Seção 4: Natural Features — Botão VASCULHAR LOCAL */
+
             <button
               type="button"
               data-testid="place-action-scavenge"
@@ -1467,7 +1434,7 @@ export default function PlaceArrivalModal({
                   : "VASCULHAR LOCAL"}
             </button>
           ) : isTransportation ? (
-            /* Seção 5.1: Transportation — Botão VER LOCALIZAÇÕES PRÓXIMAS */
+
             <button
               type="button"
               data-testid="place-action-transport-map"
@@ -1494,7 +1461,7 @@ export default function PlaceArrivalModal({
               VER LOCALIZAÇÕES PRÓXIMAS
             </button>
           ) : isCulture ? (
-            /* Seção 5: Culture — Botão RECEBER APRIMORAMENTO (vez única por Place) */
+
             <button
               type="button"
               data-testid="place-action-culture-buff"
@@ -1525,7 +1492,7 @@ export default function PlaceArrivalModal({
                   : "RECEBER APRIMORAMENTO"}
             </button>
           ) : isSports ? (
-            /* Item 5: Sports — Aprimoramento uma única vez por Place. Se já concluído, não exibe as opções novamente */
+
             isSportsCompleted ? (
               <div
                 data-testid="sports-completed-panel"
@@ -1613,7 +1580,7 @@ export default function PlaceArrivalModal({
               </div>
             )
           ) : (
-            /* Ação para Arena, Boss, Loja (Shopping e Food and Drink) ou Categorias WIP */
+
             <button
               type="button"
               data-testid={

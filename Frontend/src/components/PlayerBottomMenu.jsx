@@ -1,9 +1,5 @@
 import { MENU_PLACEHOLDER_ICONS } from "../config/placeholderAssets";
 
-/**
- * Estilo compartilhado entre o botão MENU e o botão FECHAR de todos os menus de tela cheia.
- * Garante exatamente o mesmo tamanho e a mesma posição (parte inferior central da tela).
- */
 const MAIN_MENU_BUTTON_BASE_STYLE = {
   position: "fixed",
   bottom: 22,
@@ -91,7 +87,7 @@ export default function PlayerBottomMenu({
         pointerEvents: "none",
       }}
     >
-      {/* Submenu Lado Esquerdo: Status e Inventário */}
+
       <div
         style={{
           display: "flex",
@@ -150,7 +146,6 @@ export default function PlayerBottomMenu({
         ))}
       </div>
 
-      {/* Botão Principal Centralizado: MENU */}
       <button
         type="button"
         onClick={onToggleSubmenu}
@@ -170,7 +165,6 @@ export default function PlayerBottomMenu({
         {isSubmenuOpen ? "▲ MENU" : "☰ MENU"}
       </button>
 
-      {/* Submenu Lado Direito: Estatísticas e Configurações */}
       <div
         style={{
           display: "flex",
@@ -231,4 +225,3 @@ export default function PlayerBottomMenu({
     </div>
   );
 }
-

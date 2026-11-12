@@ -1,9 +1,3 @@
-/**
- * Classificação centralizada de Places (Tabela A da documentação oficial do Google Places).
- * Somente as 10 categorias permitidas abaixo são aceitas no jogo.
- * Qualquer Place que não pertença a uma dessas 10 categorias é descartado (retorna null).
- */
-
 export const ALLOWED_CATEGORIES = {
   CULTURE: "Culture",
   ENTERTAINMENT: "Entertainment and Recreation",
@@ -45,9 +39,6 @@ export const SPECIFIC_NATURAL_SUBCATEGORIES = [
   "woods",
 ];
 
-/**
- * Seção 6: Lista determinística e ordenada das 24 subcategorias oficiais de Transportation (Google Places API).
- */
 export const ORDERED_TRANSPORTATION_SUBCATEGORIES = [
   "international_airport",
   "airport",
@@ -84,10 +75,6 @@ export function isAllowedTransportationSubcategory(subcategory) {
   return ALLOWED_TRANSPORTATION_SUBCATEGORIES.has(subcategory.trim().toLowerCase());
 }
 
-/**
- * Identifica a subcategoria específica de um Place de Transportation considerando primaryType e types,
- * sem escolher aleatoriamente e ignorando tipos genéricos como point_of_interest ou establishment.
- */
 export function resolveTransportationSubcategory(
   primaryType = null,
   types = [],
@@ -122,9 +109,6 @@ export function resolveTransportationSubcategory(
   return null;
 }
 
-/**
- * Seção 4.1: Nomes traduzidos e simplificados obrigatórios das 8 subcategorias de Natural Features.
- */
 export const NATURAL_FEATURE_SUBCATEGORY_NAMES = {
   beach: "Praia",
   island: "Ilha",
@@ -136,9 +120,6 @@ export const NATURAL_FEATURE_SUBCATEGORY_NAMES = {
   woods: "Bosque",
 };
 
-/**
- * Seção 4.2: Textos próprios de flavor para cada uma das oito subcategorias de Natural Features.
- */
 export const NATURAL_FEATURE_FLAVOR_TEXTS = {
   beach:
     "A brisa do mar percorre a faixa de areia úmida, onde as ondas costumam deixar vestígios trazidos pela maré.",
@@ -158,14 +139,10 @@ export const NATURAL_FEATURE_FLAVOR_TEXTS = {
     "As árvores fechadas filtram a luz do sol sobre caminhos naturais cobertos de folhas, raízes e esconderijos.",
 };
 
-/**
- * Traduções amigáveis de subcategorias para exibição nos menus sem expor identificadores técnicos.
- */
 export const SUBCATEGORY_TRANSLATIONS = {
   ...NATURAL_FEATURE_SUBCATEGORY_NAMES,
   natural_feature: "Bosque",
 
-  // Transportation (24 subcategorias oficiais da Google Places API)
   airport: "Aeroporto",
   airstrip: "Pista de pouso",
   bike_sharing_station: "Estação de bicicletas",
@@ -191,7 +168,6 @@ export const SUBCATEGORY_TRANSLATIONS = {
   transportation_service: "Serviço de transporte",
   truck_stop: "Parada de caminhões",
 
-  // Culture (Seção 6)
   art_gallery: "Galeria de arte",
   art_studio: "Estúdio de arte",
   auditorium: "Auditório",
@@ -202,7 +178,6 @@ export const SUBCATEGORY_TRANSLATIONS = {
   performing_arts_theater: "Teatro",
   sculpture: "Escultura",
 
-  // Sports (Seção 7)
   arena: "Arena esportiva",
   athletic_field: "Campo esportivo",
   fishing_charter: "Pesca esportiva",
@@ -220,7 +195,6 @@ export const SUBCATEGORY_TRANSLATIONS = {
   stadium: "Estádio",
   swimming_pool: "Piscina esportiva",
 
-  // Services (Seção 3.3)
   astrologer: "Astrólogo",
   barber_shop: "Barbearia",
   beautician: "Estética",
@@ -259,7 +233,6 @@ export const SUBCATEGORY_TRANSLATIONS = {
   travel_agency: "Agência de viagens",
   veterinary_care: "Clínica veterinária",
 
-  // Shopping (Seção 3.1)
   shopping_mall: "Shopping Center",
   store: "Loja de equipamentos",
   clothing_store: "Loja de vestuário",
@@ -285,7 +258,6 @@ export const SUBCATEGORY_TRANSLATIONS = {
   warehouse_store: "Atacado",
   wholesaler: "Distribuidora",
 
-  // Food and Drink (Seção 3.2)
   restaurant: "Restaurante",
   cafe: "Cafeteria",
   coffee_shop: "Cafeteria",
@@ -312,7 +284,6 @@ export const SUBCATEGORY_TRANSLATIONS = {
   japanese_restaurant: "Restaurante japonês",
   sushi_restaurant: "Restaurante de sushi",
 
-  // Health, Lodging, Entertainment, Home
   general_hospital: "Hospital geral",
   hospital: "Hospital",
   pharmacy: "Farmácia",
@@ -359,10 +330,6 @@ export function getNaturalFeatureFlavorText(subcategory) {
   );
 }
 
-/**
- * Ordem de prioridade centralizada e documentada para classificação quando primaryType
- * não está presente ou não pertence às 10 categorias permitidas.
- */
 export const ORDERED_CATEGORY_RULES = [
   {
     category: ALLOWED_CATEGORIES.ENTERTAINMENT,
@@ -594,10 +561,6 @@ function buildClassification(rule, subcategory, normalizedTypes = []) {
   };
 }
 
-/**
- * Classifica um Place com base no primaryType e na lista de types retornada pelo Google.
- * Retorna null se o Place não pertencer a nenhuma das 10 categorias permitidas da Tabela A.
- */
 export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCategory = null) {
   const normalizedPrimary =
     typeof primaryType === "string" && primaryType.trim().length > 0
@@ -614,7 +577,6 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     normalizedTypes.unshift(normalizedPrimary);
   }
 
-  // 1. Verificar se o Place possui o tipo shopping_mall (prioridade máxima -> Boss)
   if (
     normalizedPrimary === SPECIAL_BOSS_SUBCATEGORY ||
     normalizedTypes.includes(SPECIAL_BOSS_SUBCATEGORY)
@@ -625,7 +587,6 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     return buildClassification(shoppingRule, SPECIAL_BOSS_SUBCATEGORY, normalizedTypes);
   }
 
-  // 2. Preservar general_hospital quando presente nos tipos de Health and Wellness (Seção 7.1)
   if (
     normalizedPrimary === SPECIAL_HOSPITAL_SUBCATEGORY ||
     normalizedTypes.includes(SPECIAL_HOSPITAL_SUBCATEGORY)
@@ -636,7 +597,6 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     return buildClassification(healthRule, SPECIAL_HOSPITAL_SUBCATEGORY, normalizedTypes);
   }
 
-  // 3. Utilizar primeiro o primaryType, caso pertença a uma das 10 categorias permitidas
   if (normalizedPrimary) {
     const primaryRule = findRuleForSubcategory(normalizedPrimary);
     if (primaryRule) {
@@ -644,7 +604,6 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     }
   }
 
-  // 4. Caso contrário, buscar nos types válidos seguindo a ordem de prioridade centralizada
   for (const rule of ORDERED_CATEGORY_RULES) {
     const matched =
       rule.category === ALLOWED_CATEGORIES.TRANSPORTATION
@@ -676,7 +635,6 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     return buildClassification(shoppingRule, "store", normalizedTypes);
   }
 
-  // Caso já venha pré-classificado do backend em uma das 10 categorias permitidas
   if (typeof explicitCategory === "string" && explicitCategory.trim().length > 0) {
     const ruleByCategoryName = ORDERED_CATEGORY_RULES.find(
       (r) => r.category.toLowerCase() === explicitCategory.trim().toLowerCase(),
@@ -687,7 +645,6 @@ export function mapPlaceCategory(rawTypes = [], primaryType = null, explicitCate
     }
   }
 
-  // Se não for possível classificar em uma das 10 categorias permitidas, descarta o Place
   return null;
 }
 
@@ -785,7 +742,6 @@ export function normalizePlaceRecord(rawPlace, index = 0) {
 
   const categoryInfo = mapPlaceCategory(rawTypes, primaryType, rawPlace.category);
 
-  // Locais fora das 10 categorias permitidas da Tabela A são completamente ignorados
   if (!categoryInfo) {
     return null;
   }

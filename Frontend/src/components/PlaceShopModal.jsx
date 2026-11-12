@@ -12,11 +12,6 @@ import { FullScreenMenuCloseButton } from "./PlayerBottomMenu";
 const TOTAL_SHOP_SLOTS = 10;
 const TOTAL_BACKPACK_SLOTS = 50;
 
-/**
- * Gera os 10 espaços estruturais superiores preparados para receber futuramente
- * equipamentos (Shopping) ou consumíveis (Food and Drink), sem criar produtos fictícios
- * nem realizar transações reais.
- */
 function buildPreparedShopSlots(shopCategory) {
   const isConsumableShop = shopCategory === ALLOWED_CATEGORIES.FOOD_AND_DRINK;
   const slotPrefix = isConsumableShop ? "CONS" : "EQUIP";
@@ -34,12 +29,6 @@ function buildPreparedShopSlots(shopCategory) {
   }));
 }
 
-/**
- * Configuração modular das lojas por categoria (Seção 3):
- * - Shopping: Loja de equipamentos (inventário inferior apenas de Equipamentos).
- * - Food and Drink: Loja de consumíveis (inventário inferior apenas de Consumíveis).
- * - Services: Loja de buffs (interface estilo hospedagem, custo 50g, estado WIP).
- */
 const SHOP_CATEGORY_CONFIG = {
   [ALLOWED_CATEGORIES.SHOPPING]: {
     badgeLabel: "Shopping • Loja de Equipamentos",
@@ -92,8 +81,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
     ? playerState.mochila
     : [];
 
-  // Shopping utiliza exclusivamente o inventário de equipamentos ("Equipavel")
-  // Food and Drink utiliza exclusivamente o inventário de consumíveis ("Consumivel")
   const targetInventoryCategory = isFoodAndDrinkShop
     ? "Consumivel"
     : "Equipavel";
@@ -112,7 +99,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
     );
   }
 
-  // Seção 3.3: Services — Loja de buffs com interface semelhante à hospedagem
   if (isServicesBuffShop) {
     return (
       <div
@@ -315,7 +301,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
           flex: 1,
         }}
       >
-        {/* Cabeçalho da Loja */}
+
         <header
           style={{
             display: "flex",
@@ -374,7 +360,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
           </div>
         </header>
 
-        {/* PARTE SUPERIOR: Barra horizontal contendo 10 espaços preparados para produtos disponíveis */}
         <section
           aria-label="Produtos da Loja"
           style={{
@@ -450,7 +435,7 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
                     gap: 6,
                   }}
                 >
-                  {/* Slot de item (maior que os slots da mochila) */}
+
                   <button
                     type="button"
                     data-testid={`shop-slot-${product.slotNumber}`}
@@ -511,7 +496,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
                     </span>
                   </button>
 
-                  {/* Preço em moedas logo abaixo de cada slot */}
                   <div
                     data-testid={`shop-slot-price-${product.slotNumber}`}
                     style={{
@@ -536,7 +520,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
           </div>
         </section>
 
-        {/* PARTE INFERIOR: Inventário específico da categoria da loja (Equipamentos para Shopping, Consumíveis para Food and Drink) */}
         <section
           aria-label={shopConfig.inventoryLabel}
           style={{
@@ -686,7 +669,6 @@ export default function PlaceShopModal({ place, playerState, onClose }) {
         </section>
       </div>
 
-      {/* Submenu de Seleção de Espaço de Produto */}
       {selectedShopSlot && (
         <div
           role="dialog"

@@ -7,7 +7,7 @@ import {
 import CharacterAnimatedSprite from "../combat/CharacterAnimatedSprite";
 import { FullScreenMenuCloseButton } from "../PlayerBottomMenu";
 
-const TOTAL_BACKPACK_SLOTS = 50; // 5 x 10
+const TOTAL_BACKPACK_SLOTS = 50;
 
 const SIDE_EQUIPMENT_SLOTS = [
   { key: "Cabeca", label: "Cabeça" },
@@ -29,7 +29,7 @@ export default function PlayerInventoryModal({
   onSpawnDebugItem,
   onClose,
 }) {
-  const [activeTab, setActiveTab] = useState("Equipavel"); // "Equipavel" | "Consumivel"
+  const [activeTab, setActiveTab] = useState("Equipavel");
   const [draggedItem, setDraggedItem] = useState(null);
   const [hoveredSlot, setHoveredSlot] = useState(null);
   const [hoveredEquipSlot, setHoveredEquipSlot] = useState(null);
@@ -266,7 +266,7 @@ export default function PlayerInventoryModal({
           flex: 1,
         }}
       >
-        {/* Cabeçalho */}
+
         <header
           style={{
             display: "flex",
@@ -354,7 +354,6 @@ export default function PlayerInventoryModal({
           </div>
         )}
 
-        {/* Divisão em duas grandes áreas: Lado Esquerdo (Personagem + 7 Slots) | Lado Direito (Mochila 5x10 + Abas + Lixeira) */}
         <div
           style={{
             display: "grid",
@@ -364,7 +363,7 @@ export default function PlayerInventoryModal({
             flex: 1,
           }}
         >
-          {/* LADO ESQUERDO: Personagem e 7 Slots de Equipamento */}
+
           <section
             style={{
               background: "#18201A",
@@ -393,7 +392,6 @@ export default function PlayerInventoryModal({
               </h3>
             </div>
 
-            {/* Grade ao redor do personagem: 3 slots à esquerda, Personagem no centro, 3 slots à direita */}
             <div
               style={{
                 display: "grid",
@@ -402,14 +400,13 @@ export default function PlayerInventoryModal({
                 alignItems: "center",
               }}
             >
-              {/* 3 Slots Laterais Esquerdos: Cabeça, Superior, Inferior */}
+
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {SIDE_EQUIPMENT_SLOTS.slice(0, 3).map((slot) =>
                   renderEquipmentSlotCard(slot),
                 )}
               </div>
 
-              {/* Visual Central do Personagem (Sprite Animado ou Quadrado Clássico) */}
               <div
                 style={{
                   background: "#121814",
@@ -456,7 +453,6 @@ export default function PlayerInventoryModal({
                 </div>
               </div>
 
-              {/* 3 Slots Laterais Direitos: Mãos, Botas, Acessório */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {SIDE_EQUIPMENT_SLOTS.slice(3, 6).map((slot) =>
                   renderEquipmentSlotCard(slot),
@@ -464,7 +460,6 @@ export default function PlayerInventoryModal({
               </div>
             </div>
 
-            {/* Abaixo do personagem: Slot de Arma (7º slot) */}
             <div
               style={{
                 maxWidth: 240,
@@ -489,7 +484,6 @@ export default function PlayerInventoryModal({
             </div>
           </section>
 
-          {/* LADO DIREITO: Mochila 5x10 (50 slots) + Abas + Slot de Lixo */}
           <section
             style={{
               background: "#18201A",
@@ -502,7 +496,7 @@ export default function PlayerInventoryModal({
               gap: 14,
             }}
           >
-            {/* Topo da Mochila + Abas Equipáveis e Consumíveis */}
+
             <div
               style={{
                 display: "flex",
@@ -528,7 +522,6 @@ export default function PlayerInventoryModal({
                 </h3>
               </div>
 
-              {/* Abas da Mochila */}
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="button"
@@ -569,7 +562,6 @@ export default function PlayerInventoryModal({
               </div>
             </div>
 
-            {/* Grade de 50 Slots (10 colunas x 5 linhas = 5x10) */}
             <div
               data-testid="backpack-grid"
               style={{
@@ -710,7 +702,6 @@ export default function PlayerInventoryModal({
               })}
             </div>
 
-            {/* Rodapé da Mochila: Detalhes do Item / Dica + Slot de Lixo no canto inferior direito */}
             <div
               style={{
                 display: "flex",
@@ -760,7 +751,6 @@ export default function PlayerInventoryModal({
                 )}
               </div>
 
-              {/* 20. Slot de Lixo no canto inferior direito da mochila */}
               <div
                 data-testid="inventory-trash-slot"
                 onDragOver={(e) => {
@@ -818,4 +808,3 @@ export default function PlayerInventoryModal({
     </div>
   );
 }
-

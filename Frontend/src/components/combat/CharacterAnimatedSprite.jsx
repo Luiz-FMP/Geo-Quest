@@ -1,15 +1,9 @@
 import { useEffect, useRef } from "react";
 import { getCharacterConfig } from "../../config/characterAssets";
 
-/**
- * Componente modular de Sprite Animado do Geo-Quest.
- * 
- * - Personagens com spritesheet (Amelia, Z): renderiza animações via Canvas com deltaTime e pixel art nítida.
- * - Personagens em refação (Benjamin, Miguel): renderiza o quadrado colorido original com seu badge.
- */
 export default function CharacterAnimatedSprite({
   characterName = "Miguel",
-  action = "battleIdle", // "battleIdle" | "mapIdle" | "run" | "attack" | "damage" | "idle"
+  action = "battleIdle",
   scale = 1.0,
   flipX = false,
   isDamaged = false,
@@ -29,7 +23,6 @@ export default function CharacterAnimatedSprite({
 
   const charConfig = getCharacterConfig(characterName);
 
-  // Mapeia sinônimos de ações
   const resolvedAction = (() => {
     if (action === "idle") {
       return charConfig.animations?.battleIdle ? "battleIdle" : "mapIdle";
@@ -43,7 +36,6 @@ export default function CharacterAnimatedSprite({
     charConfig.animations?.mapIdle ||
     null;
 
-  // Carrega as imagens necessárias (spritesheet e/ou idleUrl)
   useEffect(() => {
     if (!charConfig.hasSprite) return;
 
@@ -64,14 +56,12 @@ export default function CharacterAnimatedSprite({
     }
   }, [charConfig.hasSprite, charConfig.sheetUrl, charConfig.idleUrl]);
 
-  // Reseta o frame ao trocar de ação
   useEffect(() => {
     stateRef.current.currentFrameIndex = 0;
     stateRef.current.timer = 0;
     stateRef.current.completedAction = null;
   }, [resolvedAction]);
 
-  // Game loop de animação baseado em requestAnimationFrame e deltaTime
   useEffect(() => {
     if (!charConfig.hasSprite || !animation) return;
 
@@ -88,7 +78,6 @@ export default function CharacterAnimatedSprite({
       );
       stateRef.current.lastTime = timestamp;
 
-      // 1. Atualiza lógica de frames
       const frames = animation.frames || [];
       if (frames.length > 0) {
         stateRef.current.timer += deltaTime;
@@ -102,7 +91,7 @@ export default function CharacterAnimatedSprite({
           } else if (animation.loop !== false) {
             stateRef.current.currentFrameIndex = 0;
           } else {
-            // Animação sem loop completada (ex: ataque ou dano)
+
             if (stateRef.current.completedAction !== resolvedAction) {
               stateRef.current.completedAction = resolvedAction;
               onAnimationComplete?.();
@@ -111,7 +100,6 @@ export default function CharacterAnimatedSprite({
         }
       }
 
-      // 2. Renderiza no Canvas
       const canvas = canvasRef.current;
       const targetImgUrl = animation.useIdleImage
         ? charConfig.idleUrl
@@ -125,11 +113,9 @@ export default function CharacterAnimatedSprite({
         ctx.imageSmoothingEnabled = false;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Ponto do solo na tela
         const groundX = canvas.width / 2;
         const groundY = canvas.height - 14;
 
-        // Efeito procedural de respiração sutil apenas no idle
         let scaleX = 1.0;
         let scaleY = 1.0;
         let offsetY = 0;
@@ -146,8 +132,6 @@ export default function CharacterAnimatedSprite({
           offsetY = wave * 1.2;
         }
 
-        // Calcula a escala interna de renderização para caber no canvas
-        // Normaliza altura alvo para ~180px na caixa do canvas
         const targetHeight = 180;
         const baseNormScale = targetHeight / Math.max(frame.h, 120);
 
@@ -207,7 +191,6 @@ export default function CharacterAnimatedSprite({
     onAnimationComplete,
   ]);
 
-  // Se o personagem não tiver spritesheet (Miguel ou Benjamin), exibe o quadrado original
   if (!charConfig.hasSprite) {
     const size = Math.round(64 * scale);
     return (
@@ -249,7 +232,6 @@ export default function CharacterAnimatedSprite({
     );
   }
 
-  // Personagens com spritesheet (Amelia, Z)
   const displayW = Math.round(180 * scale);
   const displayH = Math.round(210 * scale);
 

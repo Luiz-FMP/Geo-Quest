@@ -1,55 +1,42 @@
+using Microsoft.EntityFrameworkCore;
 using GeoQuest.Api.Data;
 using GeoQuest.Api.Integrations;
 using GeoQuest.Api.Services;
-using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? "Data Source=geoquest.db";
+
 builder.Services.AddDbContext<GeoQuestDbContext>(options =>
-    options.UseSqlite(
-        builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=geoquest.db"
-    )
-);
+    options.UseSqlite(connectionString));
 
-builder.Services.AddSingleton<PlaceCategoryMapper>();
-builder.Services.AddSingleton<PlayerStatsCalculator>();
+builder.Services.AddHttpClient<IGooglePlacesClient, GooglePlacesClient>();
 builder.Services.AddScoped<CombatService>();
-builder.Services.AddHttpClient<IGooglePlacesClient, GooglePlacesClient>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(10);
-});
-
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
         policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+              .AllowAnyHeader()
+              .AllowAnyMethod();
     });
 });
 
+builder.Services.AddControllers();
+
 var app = builder.Build();
 
-await DatabaseInitializer.InitializeAsync(app.Services);
-
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-else
-{
-    app.UseHsts();
+    var dbContext = scope.ServiceProvider.GetRequiredService<GeoQuestDbContext>();
+    await dbContext.Database.EnsureCreatedAsync();
+    await DatabaseInitializer.SeedDataAsync(dbContext);
 }
 
-app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
-
+app.UseAuthorization();
 app.MapControllers();
 
 app.Run();

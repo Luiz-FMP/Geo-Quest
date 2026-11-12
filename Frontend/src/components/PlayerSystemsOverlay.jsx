@@ -19,7 +19,7 @@ export default function PlayerSystemsOverlay({
   onApplyDebugCoords,
 }) {
   const [isSubmenuOpen, setIsSubmenuOpen] = useState(false);
-  const [activeMenu, setActiveMenu] = useState(null); // "status" | "inventory" | "statistics" | "settings" | null
+  const [activeMenu, setActiveMenu] = useState(null);
 
   function handleSelectMenu(menuKey) {
     setIsSubmenuOpen(false);

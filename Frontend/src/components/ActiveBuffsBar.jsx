@@ -8,14 +8,6 @@ import {
   obterExpiracaoBuffMs,
 } from "../services/playerApi.js";
 
-/**
- * Seção 3: Barra de ícones de aprimoramentos (buffs) ativos.
- * - Ícones pequenos e quadrados com bordas arredondadas, adicionados da esquerda para a direita.
- * - Abaixo de cada ícone há um contador (MM:SS) que reduz a cada segundo.
- * - Cor verde (#22C55E / #34D399) quando > 60s e vermelha (#EF4444 / #F87171) quando <= 60s (1 minuto).
- * - Quando o contador chega a 0, o buff é removido, o ícone some e os ícones à direita deslocam-se para a esquerda.
- * - Durante o combate (`compact = true`), aparece acima do personagem do jogador com ícones levemente menores.
- */
 export default function ActiveBuffsBar({
   buffs = [],
   compact = false,

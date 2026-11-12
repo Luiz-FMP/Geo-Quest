@@ -1,36 +1,13 @@
 namespace GeoQuest.Api.DTOs;
 
-public record GamePoiDto(
-    string Id,
-    string Name,
-    double Latitude,
-    double Longitude,
-    string Category,
-    string Subcategory,
-    string RawType,
-    string PlaceFunction,
-    bool IsBossSpecial,
-    string InteractionHint,
-    string? ActionLabel,
-    string? Address,
-    IReadOnlyList<string>? Types = null
-);
-
-public record TransportDestinationDto(
-    string Id,
-    string Name,
-    double Latitude,
-    double Longitude,
-    string Category,
-    string Subcategory,
-    double DistanceKm,
-    int TravelCostCoins,
-    string? Address = null
-);
-
-public record CharacterSlotDto(
-    int Id,
-    string Name,
-    bool IsAvailable,
-    string StatusLabel
-);
+public class GamePoiDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public double Lat { get; set; }
+    public double Lng { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string Subcategory { get; set; } = string.Empty;
+    public string Color { get; set; } = "#C89B5C";
+    public bool IsBossSpecial { get; set; }
+}

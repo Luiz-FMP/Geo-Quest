@@ -192,7 +192,7 @@ export default function PlayerStatusModal({
           gap: 20,
         }}
       >
-        {/* Cabeçalho */}
+
         <header
           style={{
             display: "flex",
@@ -221,7 +221,6 @@ export default function PlayerStatusModal({
             </h2>
           </div>
 
-          {/* Card Nível de Poder (Atributo Derivado calculado pelo Backend) */}
           <div
             style={{
               background: "#1B241D",
@@ -293,7 +292,6 @@ export default function PlayerStatusModal({
           </div>
         )}
 
-        {/* Caso o usuário tenha clicado em Trocar Personagem, reutiliza a tela CharacterSelectScreen existente */}
         {isChangingCharacter ? (
           <div
             style={{
@@ -316,7 +314,7 @@ export default function PlayerStatusModal({
           </div>
         ) : (
           <>
-            {/* Linha Superior: Nome do Usuário + Personagem Atual */}
+
             <div
               style={{
                 display: "grid",
@@ -324,7 +322,7 @@ export default function PlayerStatusModal({
                 gap: 16,
               }}
             >
-              {/* 6.1 Nome do Usuário */}
+
               <section
                 style={{
                   background: "#18201A",
@@ -450,7 +448,6 @@ export default function PlayerStatusModal({
                 )}
               </section>
 
-              {/* 7. Personagem Atual */}
               <section
                 style={{
                   background: "#18201A",
@@ -540,7 +537,6 @@ export default function PlayerStatusModal({
               </section>
             </div>
 
-            {/* 8 & 10. Tabela/Cards de Atributos (Atributo Base -> Modificadores -> Atributo Final) */}
             <section
               style={{
                 background: "#18201A",
@@ -661,7 +657,6 @@ export default function PlayerStatusModal({
               </div>
             </section>
 
-            {/* 22. Estrutura para Buffs */}
             <section
               style={{
                 background: "#18201A",
@@ -763,4 +758,3 @@ export default function PlayerStatusModal({
     </div>
   );
 }
-

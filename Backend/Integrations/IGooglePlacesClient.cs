@@ -2,36 +2,18 @@ using GeoQuest.Api.DTOs;
 
 namespace GeoQuest.Api.Integrations;
 
-public record PlacesLookupResult(
-    bool IsSuccess,
-    IReadOnlyList<GamePoiDto> Places,
-    string? ErrorCode = null,
-    string? ErrorMessage = null
-);
-
-public record TransportDestinationsLookupResult(
-    bool IsSuccess,
-    string TransportType,
-    int RadiusMetersUsed,
-    IReadOnlyList<TransportDestinationDto> Destinations,
-    string? ErrorCode = null,
-    string? ErrorMessage = null
-);
-
 public interface IGooglePlacesClient
 {
-    Task<PlacesLookupResult> GetNearbyPlacesAsync(
+    Task<IReadOnlyList<GamePoiDto>> SearchNearbyGamePoisAsync(
         double latitude,
         double longitude,
-        int radiusMeters,
-        CancellationToken cancellationToken = default
-    );
+        double radiusMeters = 1200,
+        CancellationToken cancellationToken = default);
 
-    Task<TransportDestinationsLookupResult> SearchTransportDestinationsAsync(
+    Task<(IReadOnlyList<GamePoiDto> Places, double RadiusUsedMeters)> SearchTransportationDestinationsAsync(
         double latitude,
         double longitude,
-        string transportType,
+        string transportSubcategory,
         string? excludePlaceId = null,
-        CancellationToken cancellationToken = default
-    );
+        CancellationToken cancellationToken = default);
 }

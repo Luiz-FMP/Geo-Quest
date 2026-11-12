@@ -85,18 +85,14 @@ export function saveDebugCoordinatesConfig({ enabled, latitude, longitude }) {
     };
     try {
       localStorage.setItem(DEBUG_COORDS_STORAGE_KEY, JSON.stringify(config));
-    } catch {
-      // Ignora falha de escrita em storage restrito
-    }
+    } catch { void 0; }
     return config;
   }
 
   const disabledConfig = { enabled: false, latitude: "", longitude: "" };
   try {
     localStorage.setItem(DEBUG_COORDS_STORAGE_KEY, JSON.stringify(disabledConfig));
-  } catch {
-    // Ignora falha de escrita em storage restrito
-  }
+  } catch { void 0; }
   return disabledConfig;
 }
 
@@ -216,17 +212,9 @@ function createDebugItemInstance(inventarioId = 1, slotIndice = 0) {
 }
 
 export const CUSTO_MOEDAS_BUFF_SERVICES = 50;
-export const DURACAO_SEGUNDOS_BUFF_SERVICES = 600; // 10 minutos
-export const DURACAO_SEGUNDOS_BUFF_CULTURE = 300; // 5 minutos
+export const DURACAO_SEGUNDOS_BUFF_SERVICES = 600;
+export const DURACAO_SEGUNDOS_BUFF_CULTURE = 300;
 
-/**
- * Seção 4: Probabilidades de sorteio do atributo para Services:
- * - Vida (+15): 25% [0.00, 0.25)
- * - Energia (+20): 25% [0.25, 0.50)
- * - Dano (+4): 15% [0.50, 0.65)
- * - Defesa (+4): 15% [0.65, 0.80)
- * - Velocidade (+4): 20% [0.80, 1.00)
- */
 export function sortearAtributoServices(roll = Math.random()) {
   const safeRoll = Number.isFinite(Number(roll)) ? Number(roll) : 0;
   if (safeRoll < 0.25) return "vida";
@@ -236,15 +224,6 @@ export function sortearAtributoServices(roll = Math.random()) {
   return "velocidade";
 }
 
-/**
- * Seção 5: Probabilidades de sorteio do aprimoramento em Culture:
- * - Vida (+20): 20% [0.00, 0.20)
- * - Energia (+40): 20% [0.20, 0.40)
- * - Dano (+6): 15% [0.40, 0.55)
- * - Defesa (+6): 15% [0.55, 0.70)
- * - Velocidade (+6): 20% [0.70, 0.90)
- * - Nenhum Aprimoramento: 10% [0.90, 1.00)
- */
 export function sortearResultadoCulture(roll = Math.random()) {
   const safeRoll = Number.isFinite(Number(roll)) ? Number(roll) : 0;
   if (safeRoll < 0.2) return "vida";
@@ -343,12 +322,6 @@ export function identificarAtributoBuff(buff) {
   return "desconhecido";
 }
 
-/**
- * Converte o instante de expiração (UTC) de um buff em milissegundos.
- * Timestamps sem indicador de fuso (ex.: "2026-11-06T01:42:00" vindo do SQLite)
- * são tratados como UTC — caso contrário o navegador os interpretaria como horário
- * local, deslocando o contador pelo offset do fuso (ex.: +180 min em UTC-3).
- */
 export function obterExpiracaoBuffMs(expiraEmUtc) {
   if (expiraEmUtc === null || expiraEmUtc === undefined || expiraEmUtc === "") {
     return NaN;
@@ -387,7 +360,6 @@ export function filtrarBuffsAtivosUnicosPorAtributo(buffs, nowMs = Date.now()) {
     return Number.isFinite(expMs) && expMs > nowMs;
   });
 
-  // Ordena por id (ordem de aquisição) e sobrescreve caso haja mais de um para o mesmo atributo
   const ordenados = [...validos].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
   const resultado = [];
   for (const buff of ordenados) {
@@ -499,9 +471,7 @@ function getOrCreateLocalState() {
         return recalculateState(parsed);
       }
     }
-  } catch {
-    // Continua com criação padrão
-  }
+  } catch { void 0; }
 
   const initial = recalculateState({
     id: 1,
@@ -650,9 +620,6 @@ function upsertLocalPlaceVisitAndState(
     estado.curaGratuitaUtilizada = true;
   }
 
-  // Atualização independente de checkpoints:
-  // - Health and Wellness: basta visitar o hospital para salvar o Checkpoint de Vida.
-  // - Lodging: é necessário usar o local de descanso (Descansar) para salvar o Checkpoint de Energia.
   if (categoria === "Health and Wellness") {
     local.checkpointVida = {
       placeId,
@@ -675,7 +642,6 @@ function upsertLocalPlaceVisitAndState(
     };
   }
 
-  // Histórico limitado a 10 locais por categoria (Seção 5)
   if (!TRACKED_HISTORY_CATEGORIES.has(categoria)) {
     return;
   }
@@ -785,9 +751,7 @@ export async function fetchJogadorAtual() {
     if (serverState) {
       return saveLocalState(serverState);
     }
-  } catch {
-    // Fallback local sincronizado
-  }
+  } catch { void 0; }
   return getOrCreateLocalState();
 }
 
@@ -1226,17 +1190,16 @@ export async function retornarParaCheckpointJogador(motivo, destino) {
     } else {
       if (usarCheckpoint && local.checkpointVida) {
         target = { ...local.checkpointVida };
-        // Ao voltar para o hospital: recupera 50% de vida para hospitais grandes (general_hospital)
-        // e 25% de vida para os outros, mantendo a energia igual.
+
         const isGeneralHospital =
           String(target.subcategoria || "").toLowerCase() ===
           "general_hospital";
         const pct = isGeneralHospital ? 0.5 : 0.25;
         const recVida = Math.max(1, Math.round(maxVida * pct));
         local.atributos.vidaAtual = Math.min(maxVida, recVida);
-        // Mantém local.atributos.energiaAtual igual
+
       } else {
-        // Ao morrer e retornar para o Home: recupera 50% da Vida total e 100% de Energia (mesma coisa que descansar no Home)
+
         const recVida = Math.max(1, Math.round(maxVida * 0.5));
         local.atributos.vidaAtual = Math.min(maxVida, recVida);
         local.atributos.energiaAtual = maxEnergia;
@@ -1490,9 +1453,7 @@ export async function fetchInimigosDisponiveis() {
     if (Array.isArray(list) && list.length > 0) {
       return list;
     }
-  } catch {
-    // Fallback local
-  }
+  } catch { void 0; }
   return DEFAULT_ENEMIES;
 }
 
@@ -1502,12 +1463,9 @@ export async function fetchBossesDisponiveis() {
     if (Array.isArray(list) && list.length > 0) {
       return list;
     }
-  } catch {
-    // Fallback local
-  }
+  } catch { void 0; }
   return DEFAULT_BOSSES;
 }
-
 
 const localProcessedExplorations = new Map();
 const localProcessedSportsInteractions = new Set();
@@ -1521,8 +1479,7 @@ function selectNaturalExplorationRewardCategory(roll) {
 export function calcularCustoViagemTransporte(distanciaKm) {
   const dist = Number(distanciaKm);
   if (!Number.isFinite(dist) || dist <= 0) return 0;
-  // Seção 5.5: distancia_km * 10 convertido em moedas (g), sem modificador de velocidade.
-  // Arredondamento: Math.round (meio para cima) com mínimo de 1g para viagens com distância > 0.
+
   return Math.max(1, Math.round(dist * 10));
 }
 
@@ -1844,7 +1801,7 @@ export async function treinarSportsJogador({
       incrementoAplicado = 5;
       rotuloMelhoria = "+5 Vida máxima";
       local.atributos.vidaBase = (local.atributos?.vidaBase ?? 50) + 5;
-      // Regra 7.2: Não recuperar 5 pontos de vida atuais.
+
       mensagem = "Treino concluído: +5 de Vida máxima permanente aplicado!";
     } else if (normalizedOption === "energia") {
       incrementoAplicado = 10;
@@ -1852,7 +1809,7 @@ export async function treinarSportsJogador({
       local.atributos.energiaBase = Number(
         ((local.atributos?.energiaBase ?? 100) + 10).toFixed(2),
       );
-      // Regra 7.2: Não recuperar 10 pontos de energia atuais.
+
       mensagem = "Treino concluído: +10 de Energia máxima permanente aplicado!";
     } else if (normalizedOption === "velocidade") {
       incrementoAplicado = 1;
@@ -1910,9 +1867,7 @@ function extrairAtributoPersistidoServices(estoqueJson) {
     if (["vida", "energia", "dano", "defesa", "velocidade"].includes(attr)) {
       return attr;
     }
-  } catch {
-    // Ignora JSON inválido
-  }
+  } catch { void 0; }
   return null;
 }
 
@@ -1921,7 +1876,7 @@ function aplicarOuSobrescreverBuffLocal(local, spec, duracaoSegundos) {
     local.buffs = [];
   }
   const nowMs = Date.now();
-  // Remove buffs expirados e qualquer buff anterior do mesmo atributo (Seção 3: sobrescreve mesmo atributo)
+
   local.buffs = local.buffs.filter((b) => {
     if (!b || !b.ativo) return false;
     if (b.expiraEmUtc) {
@@ -2226,10 +2181,7 @@ export async function sincronizarBuffsJogador() {
     if (updated) {
       return saveLocalState(updated);
     }
-  } catch {
-    // Fallback local limpa buffs expirados e recalcula atributos
-  }
+  } catch { void 0; }
   const local = getOrCreateLocalState();
   return saveLocalState(local);
 }
-

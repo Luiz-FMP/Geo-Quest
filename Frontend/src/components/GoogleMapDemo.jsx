@@ -9,6 +9,7 @@ import {
 import { getCharacterPlaceholder } from "../config/placeholderAssets";
 import { getCharacterConfig } from "../config/characterAssets";
 import { precomputePlayerMarkerFrames } from "../utils/playerMapSprite";
+import { haversineDistanceKm } from "../utils/geolocation";
 import {
   COMBAT_TYPES,
   iniciarSessaoCombate,
@@ -32,17 +33,17 @@ import PlaceShopModal from "./PlaceShopModal";
 import RecoveryModal from "./RecoveryModal";
 
 const PLACES_CACHE_STORAGE_KEY = "geoquest_places_spatial_cache_v2";
-const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22; // 220 metros: evita chamadas redundantes à API para locais muito próximos
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
-// Raio de busca de POIs ao redor do jogador e quantidade máxima exibida no mapa.
+const MIN_DISTANCE_FOR_NEW_PLACES_FETCH_KM = 0.22;
+const CACHE_TTL_MS = 30 * 60 * 1000;
+
 const NEARBY_PLACES_RADIUS_METERS = 1200;
 const NEARBY_MAX_PLACES = 18;
-// O backend faz até 2 rodadas de consultas à Places API para garantir diversidade.
+
 const NEARBY_BACKEND_TIMEOUT_MS = 8000;
 const PROGRESSIVE_TRANSPORT_RADII_METERS = [5000, 15000, 30000, 50000];
-// A busca de transporte acumula destinos até existir pelo menos um além desta distância.
+
 const FAR_TRANSPORT_DESTINATION_THRESHOLD_KM = 5;
-// Limite de resultados por consulta da Places API (New) Nearby Search.
+
 const PLACES_NEARBY_MAX_RESULTS = 20;
 
 const GAME_MAP_STYLES = [
@@ -95,7 +96,6 @@ const GAME_MAP_STYLES = [
   },
 ];
 
-// Seção 5.2: Estilo visual distinto para o modo alternativo de transporte
 const TRANSPORT_MAP_STYLES = [
   { elementType: "geometry", stylers: [{ color: "#0b192c" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#93c5fd" }] },
@@ -179,8 +179,7 @@ function createPlaceIconDataUrl(
   isBossSpecial = false,
   isCompleted = false,
 ) {
-  // POIs concluídos: borda dourada (#FCD34D, mesma referência do Boss).
-  // POIs não concluídos: borda preta (#161D18). Boss mantém borda dourada.
+
   const stroke = isSelected
     ? isCompleted || isBossSpecial
       ? "#FEF08A"
@@ -189,7 +188,7 @@ function createPlaceIconDataUrl(
       ? "#FCD34D"
       : "#161D18";
   const strokeWidth = isSelected ? "3.5" : "2.5";
-  // shopping_mall (Boss) possui tamanho maior que os demais POIs
+
   const size = isBossSpecial ? (isSelected ? 36 : 30) : isSelected ? 30 : 24;
   const dotColor = isCompleted ? "#FCD34D" : "#161D18";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 28 28">
@@ -257,22 +256,6 @@ function decodeEncodedPolyline(encoded) {
   return points;
 }
 
-function haversineDistanceKm(a, b) {
-  if (!a || !b) return 0;
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const sinLat = Math.sin(dLat / 2);
-  const sinLng = Math.sin(dLng / 2);
-  const h =
-    sinLat * sinLat +
-    Math.cos((a.lat * Math.PI) / 180) *
-      Math.cos((b.lat * Math.PI) / 180) *
-      sinLng *
-      sinLng;
-  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
 function calculatePathDistanceKm(points) {
   if (!Array.isArray(points) || points.length < 2) return 0;
   let totalKm = 0;
@@ -333,9 +316,7 @@ function saveSpatialCacheToSession(entries) {
       PLACES_CACHE_STORAGE_KEY,
       JSON.stringify(entries.slice(-15)),
     );
-  } catch {
-    // Ignore storage quota errors
-  }
+  } catch { void 0; }
 }
 
 function interpolateRoutePoints(rawPoints, totalSteps = 90) {
@@ -423,15 +404,12 @@ function GameMapContent({
   const [hasArrivedAtPlace, setHasArrivedAtPlace] = useState(false);
   const [lastRouteSummary, setLastRouteSummary] = useState(null);
 
-  // Estado de recolhimento/expansão do painel de Locais Próximos (Seção 4)
   const [isPlacesPanelCollapsed, setIsPlacesPanelCollapsed] = useState(false);
 
-  // Estado do combate ativo, loja aberta e modal de morte/esgotamento
   const [activeCombatSession, setActiveCombatSession] = useState(null);
   const [activeShopPlace, setActiveShopPlace] = useState(null);
-  const [recoveryMode, setRecoveryMode] = useState(null); // "esgotamento" | "morte" | null
+  const [recoveryMode, setRecoveryMode] = useState(null);
 
-  // Seção 5: Estado do modo de mapa alternativo de transporte
   const [transportMode, setTransportMode] = useState(null);
 
   const polylineRef = useRef(null);
@@ -444,7 +422,6 @@ function GameMapContent({
   const allDiscoveredPlacesRef = useRef([]);
   const inFlightCenterRef = useRef(null);
 
-  // Place especial Home (Item 2): representa sempre a localização atual do usuário ao iniciar a sessão (ou coordenadas de debug)
   const homeLat = playerState?.home?.latitude;
   const homeLng = playerState?.home?.longitude;
   const homeCoords = useMemo(() => {
@@ -504,7 +481,6 @@ function GameMapContent({
     }
   }, [initialCoords, onDefineHome]);
 
-  // Alterna o estilo visual do Google Map quando entra ou sai do modo de transporte (Seção 5.2)
   useEffect(() => {
     if (!map) return;
     map.setOptions({
@@ -542,7 +518,6 @@ function GameMapContent({
   const [movingDirection, setMovingDirection] = useState("right");
   const prevCoordRef = useRef(playerCoords);
 
-  // Pré-computa os frames para o mapa se o personagem tiver spritesheet
   useEffect(() => {
     let isSubscribed = true;
     if (charConfig.hasSprite) {
@@ -557,7 +532,6 @@ function GameMapContent({
     };
   }, [charConfig.name, charConfig.hasSprite]);
 
-  // Rastreia a direção do movimento horizontal (oeste -> esquerda, leste -> direita)
   useEffect(() => {
     if (playerCoords && prevCoordRef.current) {
       const dx = playerCoords.lng - prevCoordRef.current.lng;
@@ -570,7 +544,6 @@ function GameMapContent({
     prevCoordRef.current = playerCoords;
   }, [playerCoords]);
 
-  // Loop suave da animação de corrida (avança frames sem salto brusco)
   useEffect(() => {
     if (!isMoving || !charConfig.hasSprite || !markerFrames) {
       setRunFrameIndex(0);
@@ -584,7 +557,6 @@ function GameMapContent({
     return () => clearInterval(intervalId);
   }, [isMoving, charConfig.hasSprite, markerFrames]);
 
-  // Ícone dinâmico do marcador do jogador no mapa
   const playerMarkerIcon = useMemo(() => {
     if (!charConfig.hasSprite || !markerFrames) {
       return characterSquareIcon;
@@ -681,7 +653,6 @@ function GameMapContent({
 
       const center = { lat: targetCoords.lat, lng: targetCoords.lng };
 
-      // 1. Verifica cache espacial para evitar chamadas desnecessárias à API
       if (!options?.forceRefresh) {
         const now = Date.now();
         const cachedHit = spatialCacheRef.current.find(
@@ -742,9 +713,8 @@ function GameMapContent({
         setIsLoadingPlaces(false);
       };
 
-      // 2. Tenta Backend API primeiro se configurado/disponível
       const apiBase = import.meta.env.VITE_API_BASE_URL || "";
-      // Erro que o backend recebeu do Google (cota, chave recusada...), para não ser mascarado pelo fallback.
+
       let backendError = null;
       try {
         const controller = new AbortController();
@@ -760,7 +730,7 @@ function GameMapContent({
         const data = await response.json().catch(() => null);
 
         if (response.ok) {
-          // O backend consultou o Google com sucesso (mesmo que sem resultados): não há por que repetir no navegador.
+
           const rawList = Array.isArray(data?.places) ? data.places : [];
           showPlaces(
             rawList
@@ -776,11 +746,8 @@ function GameMapContent({
             message: data.message || data.error,
           };
         }
-      } catch {
-        // Backend indisponível ou tempo esgotado; continua para a busca no navegador
-      }
+      } catch { void 0; }
 
-      // Cota é do projeto Google inteiro: o navegador usaria a mesma cota, então só gastaria tentativas.
       if (backendError?.code === "OVER_QUERY_LIMIT") {
         showError(
           "Cota diária da Google Places API esgotada. Os pontos de interesse voltam quando a cota renovar (ou aumente a cota no Google Cloud Console).",
@@ -788,8 +755,6 @@ function GameMapContent({
         return;
       }
 
-      // 3. Fallback no navegador: Places API (New) primeiro; a API legada fica por último
-      //    (projetos Google Cloud novos não conseguem habilitá-la e ela retorna REQUEST_DENIED).
       let browserError = null;
 
       if (typeof placesLib.Place?.searchNearby === "function") {
@@ -868,8 +833,6 @@ function GameMapContent({
         }
       }
 
-      // Mostra a causa mais informativa: o erro do backend (vem do Google com mensagem clara),
-      // depois o da Places API (New) no navegador e, por último, o status da API legada.
       const reason =
         backendError?.message ||
         browserError ||
@@ -889,7 +852,6 @@ function GameMapContent({
     return () => clearTimeout(timerId);
   }, [map, placesLib, initialCoords, fetchNearbyPlaces]);
 
-  // Item 6: Busca progressiva de destinos de transporte exclusivamente da mesma subcategoria
   const handleOpenTransportMap = useCallback(
     async (originPlace) => {
       if (!originPlace) return;
@@ -949,14 +911,12 @@ function GameMapContent({
           return null;
         }
 
-        // Identifica a subcategoria exata do candidato usando primaryType, types ou subcategory
         const resolvedCandidateSub = resolveTransportationSubcategory(
           rawItem.primaryType,
           rawItem.types,
           rawItem.subcategory,
         );
 
-        // Regra estrita: exibir exclusivamente Places da mesma subcategoria (ex.: bus_station -> somente bus_station)
         if (!resolvedCandidateSub || resolvedCandidateSub !== transportType) {
           return null;
         }
@@ -990,7 +950,7 @@ function GameMapContent({
                 haversineDistanceKm(originCoord, { lat, lng }).toFixed(3),
               );
 
-        if (distKm < 0.02) return null; // Exclui o próprio terminal atual
+        if (distKm < 0.02) return null;
 
         const rawCost = rawItem.costCoins ?? rawItem.travelCostCoins;
 
@@ -1021,7 +981,6 @@ function GameMapContent({
           }
         }
 
-        // Sem corte por quantidade: manter só os N mais próximos descartaria os destinos distantes.
         const ordered = Array.from(dedupedMap.values()).sort(
           (a, b) => a.distanceKm - b.distanceKm,
         );
@@ -1046,13 +1005,10 @@ function GameMapContent({
               bounds.extend({ lat: dest.lat, lng: dest.lng });
             }
             map.fitBounds(bounds, 72);
-          } catch {
-            // Mantém zoom atual se fitBounds falhar
-          }
+          } catch { void 0; }
         }
       };
 
-      // Pré-carrega candidatos compatíveis já conhecidos no mapa apenas se forem exatamente da mesma subcategoria
       const collectedById = new globalThis.Map();
       for (const known of [...places, ...allDiscoveredPlacesRef.current]) {
         if (
@@ -1067,7 +1023,6 @@ function GameMapContent({
         }
       }
 
-      // 1. Tenta endpoint dedicado do Backend (Places API New progressivo 5km -> 50km pela subcategoria exata)
       try {
         const backendData = await buscarDestinosTransporte({
           lat: originCoord.lat,
@@ -1081,7 +1036,7 @@ function GameMapContent({
             ...Array.from(collectedById.values()),
             ...backendData.destinations,
           ];
-          // Se o backend retornou destinos válidos (ou se a API backend concluiu a varredura até 50km)
+
           if (
             mergedBackend.length > 0 ||
             (backendData.maxRadiusReachedMeters ?? 0) >= 50000
@@ -1095,16 +1050,12 @@ function GameMapContent({
             return;
           }
         }
-      } catch {
-        // Prossegue para busca progressiva via Google Places API (New) no navegador
-      }
+      } catch { void 0; }
 
-      // 2. Fallback híbrido progressivo no navegador: raios [5000, 15000, 30000, 50000] metros exclusivamente para transportType
       let lastRadiusUsed = PROGRESSIVE_TRANSPORT_RADII_METERS[0];
       const mapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
       const searchIncludedTypes = [transportType];
-      // Quando uma consulta por DISTANCE vem cheia (20), ampliar o raio devolve os mesmos 20 vizinhos;
-      // a partir daí usa POPULARITY para alcançar terminais mais distantes.
+
       let distanceRankingSaturated = false;
 
       for (const radiusMeters of PROGRESSIVE_TRANSPORT_RADII_METERS) {
@@ -1114,7 +1065,6 @@ function GameMapContent({
           ? "POPULARITY"
           : "DISTANCE";
 
-        // 2a. Google Places API Nearby Search (New) via SDK (Place.searchNearby)
         if (placesLib && typeof placesLib.Place?.searchNearby === "function") {
           try {
             const { places: sdkPlaces } = await placesLib.Place.searchNearby({
@@ -1152,12 +1102,9 @@ function GameMapContent({
                 address: p.formattedAddress,
               }));
             }
-          } catch {
-            // Tenta chamada REST New ou PlacesService abaixo
-          }
+          } catch { void 0; }
         }
 
-        // 2b. Google Places API Nearby Search (New) via REST v1
         if (radiusBatch.length === 0 && mapsApiKey) {
           try {
             const resp = await fetch(
@@ -1201,12 +1148,9 @@ function GameMapContent({
                 }));
               }
             }
-          } catch {
-            // Continua para PlacesService fallback
-          }
+          } catch { void 0; }
         }
 
-        // 2c. Fallback legado PlacesService.nearbySearch filtrado estritamente pela subcategoria exata
         if (radiusBatch.length === 0 && map && placesLib?.PlacesService) {
           try {
             radiusBatch = await new Promise((resolve) => {
@@ -1280,7 +1224,6 @@ function GameMapContent({
     [clearRoutePolyline, stopMovementAnimation, map, placesLib, places],
   );
 
-  // Seção 5.7: Sair do modo de transporte sem alterar posição, moedas ou estado do jogador
   const handleExitTransportMode = useCallback(() => {
     setTransportMode(null);
     if (map && playerCoords) {
@@ -1289,7 +1232,6 @@ function GameMapContent({
     }
   }, [map, playerCoords]);
 
-  // Seção 5.6: Confirmar e executar a viagem direta entre terminais de transporte
   const handleConfirmTransportTravel = useCallback(async () => {
     if (
       !transportMode?.originPlace ||
@@ -1973,9 +1915,7 @@ function GameMapContent({
             return;
           }
         }
-      } catch {
-        // Backend não disponível; prossegue para tentativa direta
-      }
+      } catch { void 0; }
 
       const directionsKey =
         import.meta.env.VITE_GOOGLE_DIRECTIONS_API_KEY ||
@@ -2026,9 +1966,7 @@ function GameMapContent({
               return;
             }
           }
-        } catch {
-          // Prossegue para DirectionsService do Maps JS SDK
-        }
+        } catch { void 0; }
       }
 
       const directionsService = new routesLib.DirectionsService();
@@ -2154,7 +2092,7 @@ function GameMapContent({
         background: isTransportModeActive ? "#0B192C" : "#161D18",
       }}
     >
-      {/* Mapa ocupando toda a tela */}
+
       <div style={{ width: "100%", height: "100%", position: "relative" }}>
         <Map
           defaultCenter={initialCoords}
@@ -2170,7 +2108,7 @@ function GameMapContent({
           }
           style={{ width: "100%", height: "100%" }}
         >
-          {/* Marcador do Jogador (Sprite Animado ou Fallback Quadrado) */}
+
           <Marker
             position={playerCoords}
             title={`${characterName} (Sua posição)`}
@@ -2178,7 +2116,6 @@ function GameMapContent({
             zIndex={1000}
           />
 
-          {/* MODO NORMAL: Marcador especial do Home + Places normais */}
           {!isTransportModeActive && homePlace && (
             <Marker
               position={{ lat: homePlace.lat, lng: homePlace.lng }}
@@ -2215,7 +2152,6 @@ function GameMapContent({
               );
             })}
 
-          {/* MODO DE TRANSPORTE (Seção 5.2): Mostra SOMENTE os pontos de transporte do mesmo tipo */}
           {isTransportModeActive &&
             transportMode.destinations.map((dest) => {
               const isSelectedDest =
@@ -2243,7 +2179,6 @@ function GameMapContent({
             })}
         </Map>
 
-        {/* Menu Superior — Overlay Minimalista Integrado ao Mapa */}
         <header
           data-testid="top-hud-overlay"
           style={{
@@ -2273,7 +2208,7 @@ function GameMapContent({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Ícone do Personagem no HUD Superior */}
+
             <div
               style={{
                 width: 34,
@@ -2453,7 +2388,6 @@ function GameMapContent({
           </div>
         </header>
 
-        {/* Seção 3: Ícones de aprimoramentos (buffs) temporários ativos no topo à esquerda, logo abaixo da barra de status */}
         {Array.isArray(playerState?.buffs) && playerState.buffs.length > 0 && (
           <div
             data-testid="map-buffs-overlay"
@@ -2473,7 +2407,6 @@ function GameMapContent({
           </div>
         )}
 
-        {/* Banner identificador do Modo Alternativo de Transporte (Seção 5.2) */}
         {isTransportModeActive && (
           <div
             data-testid="transport-mode-banner"
@@ -2508,7 +2441,6 @@ function GameMapContent({
           </div>
         )}
 
-        {/* Indicador discreto de deslocamento / erro (Modo Normal) */}
         {!isTransportModeActive &&
           (isCalculatingRoute || isMoving || placesError || routeError) && (
             <div
@@ -2565,7 +2497,6 @@ function GameMapContent({
             </div>
           )}
 
-        {/* Painel Lateral Direito: Alterna entre "Locais Próximos" (Modo Normal) e "Destinos de Transporte" (Modo Transporte) */}
         <aside
           data-testid="nearby-places-panel"
           style={{
@@ -2796,7 +2727,7 @@ function GameMapContent({
                 </>
               ) : (
                 <>
-                  {/* Place especial Home fixo no topo da lista (Modo Normal) */}
+
                   {homePlace && (
                     <button
                       type="button"
@@ -2935,7 +2866,6 @@ function GameMapContent({
         </aside>
       </div>
 
-      {/* Submenu padronizado do Place selecionado (Modo Normal) */}
       {!isTransportModeActive && (
         <PlaceArrivalModal
           key={arrivedPlace?.id || "closed"}
@@ -2976,7 +2906,6 @@ function GameMapContent({
         />
       )}
 
-      {/* Seção 5.4: Menu do destino no modo transporte (cor diferenciada, distância, custo em moedas e botão IR) */}
       {isTransportModeActive && transportMode.selectedDestination && (
         <div
           role="dialog"
@@ -3181,7 +3110,6 @@ function GameMapContent({
         </div>
       )}
 
-      {/* Seção 5.7: Botão vermelho de sair do modo transporte (mesma posição e tamanho do botão de fechar menu) */}
       {isTransportModeActive && (
         <button
           type="button"
@@ -3218,14 +3146,12 @@ function GameMapContent({
         </button>
       )}
 
-      {/* Interface de Esgotamento (Energia = 0) ou Morte (Vida = 0) */}
       <RecoveryModal
         mode={recoveryMode}
         playerState={playerState}
         onSelectReturnDestination={handleSelectReturnDestination}
       />
 
-      {/* Interface da Loja (Shopping, Food and Drink, Services) */}
       {activeShopPlace && (
         <PlaceShopModal
           place={activeShopPlace}
@@ -3234,7 +3160,6 @@ function GameMapContent({
         />
       )}
 
-      {/* Sistema de Combate Existente Integrado: Emboscada, Arena e Boss */}
       {activeCombatSession && (
         <CombatScreen
           personagem={{

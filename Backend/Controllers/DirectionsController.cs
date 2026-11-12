@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using GeoQuest.Api.Integrations;
 using Microsoft.AspNetCore.Mvc;
 
 namespace GeoQuest.Api.Controllers;
@@ -11,23 +12,19 @@ public class DirectionsController : ControllerBase
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
-    private readonly IWebHostEnvironment _env;
     private readonly ILogger<DirectionsController> _logger;
 
     public DirectionsController(
-        HttpClient httpClient,
         IConfiguration configuration,
-        IWebHostEnvironment env,
         ILogger<DirectionsController> logger)
     {
-        _httpClient = httpClient;
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         _configuration = configuration;
-        _env = env;
         _logger = logger;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetDirections(
+    public async Task<IActionResult> GetRoute(
         [FromQuery] double originLat,
         [FromQuery] double originLng,
         [FromQuery] double destLat,
@@ -35,310 +32,171 @@ public class DirectionsController : ControllerBase
         [FromQuery] string mode = "walking",
         CancellationToken cancellationToken = default)
     {
-        var apiKey = ResolveDirectionsApiKey();
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (double.IsNaN(originLat) || double.IsNaN(originLng) ||
+            double.IsNaN(destLat) || double.IsNaN(destLng))
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                error = "MISSING_DIRECTIONS_KEY",
-                message = "Chave da Directions API não configurada."
-            });
+            return BadRequest(new { message = "Coordenadas de origem ou destino inválidas." });
         }
 
-        // 1. Try Directions API (Legacy REST)
-        var legacyResult = await TryLegacyDirectionsAsync(
-            originLat, originLng, destLat, destLng, mode, apiKey, cancellationToken);
+        var apiKey = GooglePlacesClient.ResolveGoogleApiKey(
+            _configuration,
+            ["GoogleDirections:ApiKey", "GooglePlaces:ApiKey", "GoogleMaps:ApiKey"],
+            ["GOOGLE_DIRECTIONS_API_KEY", "GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY", "VITE_GOOGLE_DIRECTIONS_API_KEY", "VITE_GOOGLE_MAPS_API_KEY"]);
 
-        if (legacyResult.Success && legacyResult.Points is { Count: > 0 })
+        if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            double distanceKm = legacyResult.DistanceMeters is > 0
-                ? Math.Round(legacyResult.DistanceMeters.Value / 1000.0, 3)
-                : CalculatePolylineDistanceKm(legacyResult.Points);
-
-            return Ok(new
+            var routesV2 = await TryComputeRoutesV2Async(apiKey, originLat, originLng, destLat, destLng, mode, cancellationToken);
+            if (routesV2.Points.Count > 0)
             {
-                status = "OK",
-                provider = "directions_v1",
-                distanceKm,
-                encodedPolyline = legacyResult.EncodedPolyline,
-                points = legacyResult.Points
-            });
-        }
-
-        // If walking failed with ZERO_RESULTS, try driving
-        if (legacyResult.Status == "ZERO_RESULTS" && !string.Equals(mode, "driving", StringComparison.OrdinalIgnoreCase))
-        {
-            var drivingResult = await TryLegacyDirectionsAsync(
-                originLat, originLng, destLat, destLng, "driving", apiKey, cancellationToken);
-
-            if (drivingResult.Success && drivingResult.Points is { Count: > 0 })
-            {
-                double distanceKm = drivingResult.DistanceMeters is > 0
-                    ? Math.Round(drivingResult.DistanceMeters.Value / 1000.0, 3)
-                    : CalculatePolylineDistanceKm(drivingResult.Points);
-
                 return Ok(new
                 {
-                    status = "OK",
-                    provider = "directions_v1_driving",
-                    distanceKm,
-                    encodedPolyline = drivingResult.EncodedPolyline,
-                    points = drivingResult.Points
+                    source = "google_routes_v2",
+                    distanceKm = routesV2.DistanceKm,
+                    points = routesV2.Points
+                });
+            }
+
+            var directionsV1 = await TryLegacyDirectionsAsync(apiKey, originLat, originLng, destLat, destLng, mode, cancellationToken);
+            if (directionsV1.Points.Count > 0)
+            {
+                return Ok(new
+                {
+                    source = "google_directions_v1",
+                    distanceKm = directionsV1.DistanceKm,
+                    points = directionsV1.Points
                 });
             }
         }
 
-        // 2. Try Google Routes API v2 (computeRoutes)
-        var routesV2Result = await TryRoutesV2Async(
-            originLat, originLng, destLat, destLng, apiKey, cancellationToken);
-
-        if (routesV2Result.Success && routesV2Result.Points is { Count: > 0 })
+        var directDistKm = Math.Max(0.01, Math.Round(GooglePlacesClient.CalculateHaversineKm(originLat, originLng, destLat, destLng), 3));
+        return Ok(new
         {
-            double distanceKm = routesV2Result.DistanceMeters is > 0
-                ? Math.Round(routesV2Result.DistanceMeters.Value / 1000.0, 3)
-                : CalculatePolylineDistanceKm(routesV2Result.Points);
-
-            return Ok(new
+            source = "direct_fallback",
+            distanceKm = directDistKm,
+            points = new[]
             {
-                status = "OK",
-                provider = "routes_v2",
-                distanceKm,
-                encodedPolyline = routesV2Result.EncodedPolyline,
-                points = routesV2Result.Points
-            });
-        }
-
-        return BadRequest(new
-        {
-            error = legacyResult.Status ?? "DIRECTIONS_FAILED",
-            message = legacyResult.ErrorMessage ?? routesV2Result.ErrorMessage ?? "Não foi possível calcular a rota."
+                new RouteLatLng(originLat, originLng),
+                new RouteLatLng(destLat, destLng)
+            }
         });
     }
 
-    private async Task<(bool Success, string? Status, string? EncodedPolyline, List<CoordinatePoint>? Points, int? DistanceMeters, string? ErrorMessage)>
-        TryLegacyDirectionsAsync(
-            double originLat,
-            double originLng,
-            double destLat,
-            double destLng,
-            string mode,
-            string apiKey,
-            CancellationToken cancellationToken)
+    private async Task<(List<RouteLatLng> Points, double DistanceKm)> TryComputeRoutesV2Async(
+        string apiKey,
+        double originLat,
+        double originLng,
+        double destLat,
+        double destLng,
+        string mode,
+        CancellationToken cancellationToken)
     {
-        var originStr = $"{originLat.ToString(CultureInfo.InvariantCulture)},{originLng.ToString(CultureInfo.InvariantCulture)}";
-        var destStr = $"{destLat.ToString(CultureInfo.InvariantCulture)},{destLng.ToString(CultureInfo.InvariantCulture)}";
-        var url = $"https://maps.googleapis.com/maps/api/directions/json?origin={originStr}&destination={destStr}&mode={mode}&key={Uri.EscapeDataString(apiKey)}";
-
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (Request.Headers.TryGetValue("Origin", out var originHeader) && !string.IsNullOrWhiteSpace(originHeader))
+            var travelMode = string.Equals(mode, "driving", StringComparison.OrdinalIgnoreCase) ? "DRIVE" : "WALK";
+            var payload = new
             {
-                request.Headers.TryAddWithoutValidation("Referer", originHeader.ToString());
-            }
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = doc.RootElement;
-
-            var status = root.TryGetProperty("status", out var statusProp)
-                ? statusProp.GetString()
-                : "UNKNOWN";
-
-            if (status != "OK")
-            {
-                var errorMsg = root.TryGetProperty("error_message", out var errEl)
-                    ? errEl.GetString()
-                    : $"Directions API retornou status: {status}";
-                return (false, status, null, null, null, errorMsg);
-            }
-
-            if (root.TryGetProperty("routes", out var routes) && routes.GetArrayLength() > 0)
-            {
-                var firstRoute = routes[0];
-                int? distanceMeters = null;
-                if (firstRoute.TryGetProperty("legs", out var legs) && legs.GetArrayLength() > 0)
-                {
-                    var firstLeg = legs[0];
-                    if (firstLeg.TryGetProperty("distance", out var distObj) &&
-                        distObj.TryGetProperty("value", out var valEl) &&
-                        valEl.TryGetInt32(out int meters))
-                    {
-                        distanceMeters = meters;
-                    }
-                }
-
-                if (firstRoute.TryGetProperty("overview_polyline", out var poly) &&
-                    poly.TryGetProperty("points", out var pointsEl))
-                {
-                    var encoded = pointsEl.GetString();
-                    if (!string.IsNullOrWhiteSpace(encoded))
-                    {
-                        return (true, "OK", encoded, DecodePolyline(encoded), distanceMeters, null);
-                    }
-                }
-            }
-
-            return (false, "EMPTY_POLYLINE", null, null, null, "Rota sem geometria retornada.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Falha ao consultar Legacy Directions API.");
-            return (false, "EXCEPTION", null, null, null, ex.Message);
-        }
-    }
-
-    private async Task<(bool Success, string? EncodedPolyline, List<CoordinatePoint>? Points, int? DistanceMeters, string? ErrorMessage)>
-        TryRoutesV2Async(
-            double originLat,
-            double originLng,
-            double destLat,
-            double destLng,
-            string apiKey,
-            CancellationToken cancellationToken)
-    {
-        const string url = "https://routes.googleapis.com/directions/v2:computeRoutes";
-        var payload = new
-        {
-            origin = new
-            {
-                location = new
-                {
-                    latLng = new { latitude = originLat, longitude = originLng }
-                }
-            },
-            destination = new
-            {
-                location = new
-                {
-                    latLng = new { latitude = destLat, longitude = destLng }
-                }
-            },
-            travelMode = "WALK"
-        };
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, url)
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+                origin = new { location = new { latLng = new { latitude = originLat, longitude = originLng } } },
+                destination = new { location = new { latLng = new { latitude = destLat, longitude = destLng } } },
+                travelMode
             };
-            request.Headers.TryAddWithoutValidation("X-Goog-Api-Key", apiKey);
-            request.Headers.TryAddWithoutValidation("X-Goog-FieldMask", "routes.distanceMeters,routes.polyline.encodedPolyline");
 
-            if (Request.Headers.TryGetValue("Origin", out var originHeader) && !string.IsNullOrWhiteSpace(originHeader))
-            {
-                request.Headers.TryAddWithoutValidation("Referer", originHeader.ToString());
-            }
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://routes.googleapis.com/directions/v2:computeRoutes");
+            req.Headers.Add("X-Goog-Api-Key", apiKey);
+            req.Headers.Add("X-Goog-FieldMask", "routes.distanceMeters,routes.polyline.encodedPolyline");
+            req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = doc.RootElement;
+            using var resp = await _httpClient.SendAsync(req, cancellationToken);
+            if (!resp.IsSuccessStatusCode)
+                return ([], 0);
 
-            if (root.TryGetProperty("routes", out var routes) && routes.GetArrayLength() > 0)
-            {
-                var firstRoute = routes[0];
-                int? distanceMeters = null;
-                if (firstRoute.TryGetProperty("distanceMeters", out var distEl) &&
-                    distEl.TryGetInt32(out int meters))
-                {
-                    distanceMeters = meters;
-                }
+            var raw = await resp.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("routes", out var routes) || routes.GetArrayLength() == 0)
+                return ([], 0);
 
-                if (firstRoute.TryGetProperty("polyline", out var poly) &&
-                    poly.TryGetProperty("encodedPolyline", out var encodedEl))
-                {
-                    var encoded = encodedEl.GetString();
-                    if (!string.IsNullOrWhiteSpace(encoded))
-                    {
-                        return (true, encoded, DecodePolyline(encoded), distanceMeters, null);
-                    }
-                }
-            }
+            var first = routes[0];
+            var distanceMeters = first.TryGetProperty("distanceMeters", out var dm) ? dm.GetDouble() : 0;
+            var encoded = first.TryGetProperty("polyline", out var poly) && poly.TryGetProperty("encodedPolyline", out var enc)
+                ? enc.GetString()
+                : null;
 
-            if (root.TryGetProperty("error", out var errObj) &&
-                errObj.TryGetProperty("message", out var msgEl))
-            {
-                return (false, null, null, null, msgEl.GetString());
-            }
+            if (string.IsNullOrWhiteSpace(encoded))
+                return ([], 0);
 
-            return (false, null, null, null, "Routes API v2 não retornou rota.");
+            var decoded = DecodePolyline(encoded);
+            var distKm = distanceMeters > 0
+                ? Math.Round(distanceMeters / 1000.0, 3)
+                : Math.Round(GooglePlacesClient.CalculateHaversineKm(originLat, originLng, destLat, destLng), 3);
+
+            return (decoded, distKm);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Falha ao consultar Routes API v2.");
-            return (false, null, null, null, ex.Message);
+            _logger.LogDebug(ex, "Falha ao consultar Google Routes API v2.");
+            return ([], 0);
         }
     }
 
-    private string? ResolveDirectionsApiKey()
+    private async Task<(List<RouteLatLng> Points, double DistanceKm)> TryLegacyDirectionsAsync(
+        string apiKey,
+        double originLat,
+        double originLng,
+        double destLat,
+        double destLng,
+        string mode,
+        CancellationToken cancellationToken)
     {
-        var fromConfig = _configuration["GoogleMaps:DirectionsApiKey"]
-            ?? Environment.GetEnvironmentVariable("GOOGLE_DIRECTIONS_API_KEY")
-            ?? Environment.GetEnvironmentVariable("VITE_GOOGLE_DIRECTIONS_API_KEY");
-
-        if (!string.IsNullOrWhiteSpace(fromConfig))
+        try
         {
-            return fromConfig.Trim();
-        }
+            var travelMode = string.Equals(mode, "driving", StringComparison.OrdinalIgnoreCase) ? "driving" : "walking";
+            var url = string.Format(
+                CultureInfo.InvariantCulture,
+                "https://maps.googleapis.com/maps/api/directions/json?origin={0},{1}&destination={2},{3}&mode={4}&key={5}",
+                originLat, originLng, destLat, destLng, travelMode, apiKey);
 
-        var fromDotEnv = TryReadKeyFromFrontendDotEnv("VITE_GOOGLE_DIRECTIONS_API_KEY")
-            ?? TryReadKeyFromFrontendDotEnv("VITE_GOOGLE_MAPS_API_KEY");
+            using var resp = await _httpClient.GetAsync(url, cancellationToken);
+            if (!resp.IsSuccessStatusCode)
+                return ([], 0);
 
-        if (!string.IsNullOrWhiteSpace(fromDotEnv))
-        {
-            return fromDotEnv.Trim();
-        }
+            var raw = await resp.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("routes", out var routes) || routes.GetArrayLength() == 0)
+                return ([], 0);
 
-        var fallback = _configuration["GoogleMaps:ApiKey"]
-            ?? Environment.GetEnvironmentVariable("VITE_GOOGLE_MAPS_API_KEY");
-
-        return string.IsNullOrWhiteSpace(fallback) ? null : fallback.Trim();
-    }
-
-    private string? TryReadKeyFromFrontendDotEnv(string variableName)
-    {
-        var candidatePaths = new[]
-        {
-            Path.Combine(_env.ContentRootPath, "..", "Frontend", ".env"),
-            Path.Combine(_env.ContentRootPath, "Frontend", ".env"),
-            Path.Combine(Directory.GetCurrentDirectory(), "Frontend", ".env"),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "Frontend", ".env")
-        };
-
-        foreach (var path in candidatePaths)
-        {
-            if (!System.IO.File.Exists(path)) continue;
-
-            foreach (var rawLine in System.IO.File.ReadAllLines(path))
+            var first = routes[0];
+            double distanceMeters = 0;
+            if (first.TryGetProperty("legs", out var legs) && legs.GetArrayLength() > 0 &&
+                legs[0].TryGetProperty("distance", out var distObj) &&
+                distObj.TryGetProperty("value", out var distVal))
             {
-                var line = rawLine.Trim();
-                if (string.IsNullOrEmpty(line) || line.StartsWith('#')) continue;
-
-                var sepIndex = line.IndexOf('=');
-                if (sepIndex <= 0) continue;
-
-                var key = line[..sepIndex].Trim();
-                var value = line[(sepIndex + 1)..].Trim().Trim('"', '\'');
-
-                if (string.Equals(key, variableName, StringComparison.Ordinal) &&
-                    !string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
+                distanceMeters = distVal.GetDouble();
             }
-        }
 
-        return null;
+            var encoded = first.TryGetProperty("overview_polyline", out var poly) && poly.TryGetProperty("points", out var pts)
+                ? pts.GetString()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(encoded))
+                return ([], 0);
+
+            var decoded = DecodePolyline(encoded);
+            var distKm = distanceMeters > 0
+                ? Math.Round(distanceMeters / 1000.0, 3)
+                : Math.Round(GooglePlacesClient.CalculateHaversineKm(originLat, originLng, destLat, destLng), 3);
+
+            return (decoded, distKm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Falha ao consultar Google Directions API v1.");
+            return ([], 0);
+        }
     }
 
-    private static List<CoordinatePoint> DecodePolyline(string encoded)
+    private static List<RouteLatLng> DecodePolyline(string encoded)
     {
-        var poly = new List<CoordinatePoint>();
-        int index = 0, len = encoded.Length;
-        int lat = 0, lng = 0;
+        var poly = new List<RouteLatLng>();
+        int index = 0, len = encoded.Length, lat = 0, lng = 0;
 
         while (index < len)
         {
@@ -348,7 +206,8 @@ public class DirectionsController : ControllerBase
                 b = encoded[index++] - 63;
                 result |= (b & 0x1f) << shift;
                 shift += 5;
-            } while (b >= 0x20);
+            } while (b >= 0x20 && index < len);
+
             int dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
             lat += dlat;
 
@@ -356,41 +215,20 @@ public class DirectionsController : ControllerBase
             result = 0;
             do
             {
+                if (index >= len) break;
                 b = encoded[index++] - 63;
                 result |= (b & 0x1f) << shift;
                 shift += 5;
-            } while (b >= 0x20);
+            } while (b >= 0x20 && index < len);
+
             int dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
             lng += dlng;
 
-            poly.Add(new CoordinatePoint(lat / 1e5, lng / 1e5));
+            poly.Add(new RouteLatLng(lat / 1E5, lng / 1E5));
         }
 
         return poly;
     }
 
-    private static double CalculatePolylineDistanceKm(List<CoordinatePoint> points)
-    {
-        if (points.Count < 2) return 0.0;
-        double totalKm = 0.0;
-        for (int i = 0; i < points.Count - 1; i++)
-        {
-            totalKm += HaversineKm(points[i].Lat, points[i].Lng, points[i + 1].Lat, points[i + 1].Lng);
-        }
-        return Math.Round(totalKm, 3);
-    }
-
-    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
-    {
-        const double R = 6371.0;
-        double dLat = (lat2 - lat1) * Math.PI / 180.0;
-        double dLon = (lon2 - lon1) * Math.PI / 180.0;
-        double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
-                   Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0) *
-                   Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-        double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-        return R * c;
-    }
-
-    public record CoordinatePoint(double Lat, double Lng);
+    public sealed record RouteLatLng(double Lat, double Lng);
 }

@@ -1,8 +1,3 @@
-/**
- * Centraliza todos os placeholders visuais (personagens, itens, ícones de menu, slots, raridades e buffs)
- * para manter a lógica de negócio desacoplada de caminhos de imagem/assets definitivos.
- */
-
 export const MENU_PLACEHOLDER_ICONS = {
   status: {
     symbol: "◈",

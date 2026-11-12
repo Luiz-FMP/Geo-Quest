@@ -56,7 +56,7 @@ export default function CombatRewardModal({ recompensa, onClaim }) {
               marginBottom: 28,
             }}
           >
-            {/* Recompensa de Moedas */}
+
             <div
               style={{
                 background: "#131915",
@@ -74,7 +74,6 @@ export default function CombatRewardModal({ recompensa, onClaim }) {
               </strong>
             </div>
 
-            {/* Recompensa de Item Aleatório */}
             <div
               style={{
                 background: "#131915",

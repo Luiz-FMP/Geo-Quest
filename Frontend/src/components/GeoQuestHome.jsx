@@ -37,7 +37,7 @@ import GoogleMapDemo from "./GoogleMapDemo";
 import PlayerSystemsOverlay from "./PlayerSystemsOverlay";
 
 export default function GeoQuestHome() {
-  const [screen, setScreen] = useState("menu"); // "menu" | "character-select" | "map"
+  const [screen, setScreen] = useState("menu");
   const [coords, setCoords] = useState(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [locationError, setLocationError] = useState(null);
@@ -54,7 +54,7 @@ export default function GeoQuestHome() {
         }
       })
       .catch(() => {
-        // Caso o backend ainda não esteja rodando, mantém estado local de fallback até conectar
+
       });
     return () => {
       active = false;
@@ -118,19 +118,14 @@ export default function GeoQuestHome() {
         return;
       }
 
-      // Quando desativado durante uma sessão ativa, volta a obter a localização real do dispositivo
       if (coords && navigator.geolocation) {
         try {
           const { latitude, longitude } = await obterLocalizacaoPrecisa();
           setCoords({ lat: latitude, lng: longitude });
           try {
             await handleDefineHome(latitude, longitude, true);
-          } catch {
-            // Ignora falha de sincronização com servidor
-          }
-        } catch {
-          // Se falhar em segundo plano ao desativar debug, preserva mensagem de erro na próxima tentativa de sessão
-        }
+          } catch { void 0; }
+        } catch { void 0; }
       }
     },
     [coords, handleDefineHome],
@@ -376,7 +371,6 @@ export default function GeoQuestHome() {
   async function handleStartGame() {
     setLocationError(null);
 
-    // Prioridade 1: Se o modo de coordenadas de debug estiver habilitado, utilizar as coordenadas configuradas.
     const debugConfig = getDebugCoordinatesConfig();
     if (debugConfig?.enabled) {
       const validation = validateDebugCoordinates(
@@ -393,9 +387,7 @@ export default function GeoQuestHome() {
       setIsLoadingLocation(true);
       try {
         await handleDefineHome(validation.latitude, validation.longitude, true);
-      } catch {
-        // Segue com estado local atualizado se o backend estiver offline
-      }
+      } catch { void 0; }
 
       setCoords({
         lat: validation.latitude,
@@ -406,7 +398,6 @@ export default function GeoQuestHome() {
       return;
     }
 
-    // Prioridade 2: Caso contrário, utilizar a localização real do usuário via Geolocation API.
     if (!navigator.geolocation) {
       setLocationError("Seu navegador não suporta geolocalização.");
       return;
@@ -416,7 +407,7 @@ export default function GeoQuestHome() {
 
     let leitura;
     try {
-      // Amostra as leituras por alguns segundos e usa a mais precisa (evita a 1ª leitura aproximada por IP).
+
       leitura = await obterLocalizacaoPrecisa();
     } catch (error) {
       let message = "Não foi possível obter sua localização.";
@@ -448,9 +439,7 @@ export default function GeoQuestHome() {
 
     try {
       await handleDefineHome(latitude, longitude, true);
-    } catch {
-      // Segue com coordenadas locais se necessário
-    }
+    } catch { void 0; }
 
     setCoords({
       lat: latitude,
@@ -656,9 +645,7 @@ export default function GeoQuestHome() {
           onSelectCharacter={async (character) => {
             try {
               await handleChangeCharacter(character.id);
-            } catch {
-              // Continua mesmo se offline
-            }
+            } catch { void 0; }
             setScreen("map");
           }}
         />
@@ -793,7 +780,6 @@ export default function GeoQuestHome() {
             </div>
           )}
 
-          {/* Menu as waypoints */}
           <nav style={{ width: "100%" }}>
             {menuItems.map((item, index) => (
               <button
@@ -864,7 +850,6 @@ export default function GeoQuestHome() {
         </div>
       )}
 
-      {/* Botão MENU inferior central e Menus de Tela Cheia (Status, Inventário, Estatísticas, Configurações) */}
       <PlayerSystemsOverlay
         playerState={playerState}
         coords={coords}

@@ -1,5 +1,7 @@
-using GeoQuest.Api.Integrations;
 using Microsoft.AspNetCore.Mvc;
+using GeoQuest.Api.DTOs;
+using GeoQuest.Api.Integrations;
+using GeoQuest.Api.Services;
 
 namespace GeoQuest.Api.Controllers;
 
@@ -7,133 +9,83 @@ namespace GeoQuest.Api.Controllers;
 [Route("api/[controller]")]
 public class PlacesController : ControllerBase
 {
-    private readonly IGooglePlacesClient _placesClient;
+    private readonly IGooglePlacesClient _googlePlacesClient;
+    private readonly ILogger<PlacesController> _logger;
 
-    public PlacesController(IGooglePlacesClient placesClient)
+    public PlacesController(
+        IGooglePlacesClient googlePlacesClient,
+        ILogger<PlacesController> logger)
     {
-        _placesClient = placesClient;
+        _googlePlacesClient = googlePlacesClient;
+        _logger = logger;
     }
 
     [HttpGet("nearby")]
-    public async Task<IActionResult> GetNearby(
-        [FromQuery] double? lat,
-        [FromQuery] double? lng,
-        [FromQuery] int radius = 1200,
+    public async Task<ActionResult<IReadOnlyList<GamePoiDto>>> GetNearby(
+        [FromQuery] double lat,
+        [FromQuery] double lng,
+        [FromQuery] double radius = 1200,
         CancellationToken cancellationToken = default)
     {
-        if (lat is null || lng is null || double.IsNaN(lat.Value) || double.IsNaN(lng.Value))
+        if (double.IsNaN(lat) || double.IsNaN(lng) || lat is < -90 or > 90 || lng is < -180 or > 180)
         {
-            return BadRequest(new
-            {
-                error = "INVALID_COORDINATES",
-                message = "Latitude e longitude são obrigatórias."
-            });
+            return BadRequest(new { message = "Coordenadas inválidas. Informe valores válidos para lat e lng." });
         }
 
-        if (lat.Value < -90 || lat.Value > 90 || lng.Value < -180 || lng.Value > 180)
+        try
         {
-            return BadRequest(new
+            var places = await _googlePlacesClient.SearchNearbyGamePoisAsync(lat, lng, radius, cancellationToken);
+            return Ok(places);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao buscar POIs próximos na Google Places API.");
+            return StatusCode(StatusCodes.Status502BadGateway, new
             {
-                error = "OUT_OF_RANGE_COORDINATES",
-                message = "Coordenadas fora do intervalo válido (-90..90, -180..180)."
+                message = "Falha ao consultar lugares próximos na Google Places API.",
+                detail = ex.Message
             });
         }
-
-        var clampedRadius = Math.Clamp(radius, 100, 5000);
-
-        var result = await _placesClient.GetNearbyPlacesAsync(
-            lat.Value,
-            lng.Value,
-            clampedRadius,
-            cancellationToken
-        );
-
-        if (!result.IsSuccess)
-        {
-            var statusCode = result.ErrorCode == "MISSING_API_KEY"
-                ? StatusCodes.Status503ServiceUnavailable
-                : StatusCodes.Status502BadGateway;
-
-            return StatusCode(statusCode, new
-            {
-                error = result.ErrorCode,
-                message = result.ErrorMessage
-            });
-        }
-
-        return Ok(new
-        {
-            count = result.Places.Count,
-            places = result.Places
-        });
     }
 
-    [HttpGet("transport-destinations")]
-    public async Task<IActionResult> GetTransportDestinations(
-        [FromQuery] double? lat,
-        [FromQuery] double? lng,
-        [FromQuery] string? type,
+    [HttpGet("transportation")]
+    public async Task<IActionResult> GetTransportationDestinations(
+        [FromQuery] double lat,
+        [FromQuery] double lng,
+        [FromQuery] string type,
         [FromQuery] string? excludePlaceId = null,
         CancellationToken cancellationToken = default)
     {
-        if (lat is null || lng is null || double.IsNaN(lat.Value) || double.IsNaN(lng.Value))
+        if (double.IsNaN(lat) || double.IsNaN(lng) || lat is < -90 or > 90 || lng is < -180 or > 180)
         {
-            return BadRequest(new
-            {
-                error = "INVALID_COORDINATES",
-                message = "Latitude e longitude de origem são obrigatórias."
-            });
+            return BadRequest(new { message = "Coordenadas inválidas. Informe valores válidos para lat e lng." });
         }
 
-        if (lat.Value < -90 || lat.Value > 90 || lng.Value < -180 || lng.Value > 180)
+        if (!PlaceCategoryMapper.IsTransportationSubcategory(type))
         {
-            return BadRequest(new
-            {
-                error = "OUT_OF_RANGE_COORDINATES",
-                message = "Coordenadas fora do intervalo válido (-90..90, -180..180)."
-            });
+            return BadRequest(new { message = $"Subcategoria de transporte não suportada: '{type}'." });
         }
 
-        var normalizedType = (type ?? string.Empty).Trim().ToLowerInvariant();
-        if (!GeoQuest.Api.Services.PlaceCategoryMapper.IsAllowedTransportationSubcategory(normalizedType))
+        try
         {
-            return BadRequest(new
+            var (places, radiusUsedMeters) = await _googlePlacesClient.SearchTransportationDestinationsAsync(
+                lat, lng, type, excludePlaceId, cancellationToken);
+
+            return Ok(new
             {
-                error = "INVALID_TRANSPORT_TYPE",
-                message = $"Subcategoria de transporte inválida ('{normalizedType}')."
+                transportType = type.Trim().ToLowerInvariant(),
+                radiusUsedMeters,
+                places
             });
         }
-
-        var result = await _placesClient.SearchTransportDestinationsAsync(
-            lat.Value,
-            lng.Value,
-            normalizedType,
-            excludePlaceId,
-            cancellationToken
-        );
-
-        if (!result.IsSuccess)
+        catch (Exception ex)
         {
-            var statusCode = result.ErrorCode == "MISSING_API_KEY"
-                ? StatusCodes.Status503ServiceUnavailable
-                : StatusCodes.Status502BadGateway;
-
-            return StatusCode(statusCode, new
+            _logger.LogError(ex, "Erro ao buscar destinos de transporte ({Type}) na Google Places API.", type);
+            return StatusCode(StatusCodes.Status502BadGateway, new
             {
-                error = result.ErrorCode,
-                message = result.ErrorMessage
+                message = "Falha ao consultar destinos de transporte na Google Places API.",
+                detail = ex.Message
             });
         }
-
-        return Ok(new
-        {
-            transportType = result.TransportType,
-            radiusMetersUsed = result.RadiusMetersUsed,
-            count = result.Destinations.Count,
-            destinations = result.Destinations,
-            message = result.Destinations.Count == 0
-                ? "Não existem pontos de transporte semelhantes encontrados na região pesquisada."
-                : null
-        });
     }
 }

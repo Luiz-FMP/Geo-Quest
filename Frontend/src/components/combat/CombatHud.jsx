@@ -31,9 +31,9 @@ export default function CombatHUD({
         zIndex: 10,
       }}
     >
-      {/* COLUNA ESQUERDA: STATUS RÁPIDO + BOTÕES DE COMANDO */}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {/* Barra de Informação do Alvo Atual */}
+
         <div
           style={{
             display: "flex",
@@ -57,7 +57,6 @@ export default function CombatHUD({
           </span>
         </div>
 
-        {/* Grelha 2x2 de Botões de Ação */}
         <div
           style={{
             flex: 1,
@@ -66,7 +65,7 @@ export default function CombatHUD({
             gap: 10,
           }}
         >
-          {/* BOTÃO 1: ATACAR */}
+
           <button
             type="button"
             onClick={onAtacar}
@@ -83,7 +82,6 @@ export default function CombatHUD({
             </span>
           </button>
 
-          {/* BOTÃO 2: HABILIDADE ESPECIAL */}
           <button
             type="button"
             onClick={onHabilidade}
@@ -106,7 +104,6 @@ export default function CombatHUD({
             </span>
           </button>
 
-          {/* BOTÃO 3: DEFENDER */}
           <button
             type="button"
             onClick={onDefender}
@@ -124,7 +121,6 @@ export default function CombatHUD({
             </span>
           </button>
 
-          {/* BOTÃO 4: FUGIR */}
           <button
             type="button"
             onClick={onFugir}
@@ -149,7 +145,6 @@ export default function CombatHUD({
         </div>
       </div>
 
-      {/* COLUNA DIREITA: REGISTO DE COMBATE (CAIXA DE DIÁLOGO ESTILO DELTARUNE) */}
       <div
         style={{
           background: "#0D130F",

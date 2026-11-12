@@ -204,7 +204,6 @@ export default function PlayerSettingsModal({
           projeto.
         </p>
 
-        {/* Seção de Opções de Debug */}
         <div
           style={{
             width: "100%",
@@ -343,7 +342,6 @@ export default function PlayerSettingsModal({
           )}
         </div>
 
-        {/* Ferramenta de Desenvolvimento: Coordenadas de Debug */}
         <div
           data-testid="debug-coords-panel"
           style={{

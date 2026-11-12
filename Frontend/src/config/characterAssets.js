@@ -1,13 +1,3 @@
-/**
- * Configuração central e extensível de personagens e animações de sprites do Geo-Quest.
- * 
- * Regra de Extensibilidade:
- * Quando novos spritesheets de Miguel ou Benjamin forem adicionados no futuro:
- * 1. Coloque a imagem do spritesheet em Frontend/public/sprites/
- * 2. Altere hasSprite para true e defina sheetUrl e os frames em animations.
- * Não é necessário alterar nenhum outro componente.
- */
-
 export const CHARACTERS_CONFIG = {
   miguel: {
     id: 1,
@@ -22,7 +12,7 @@ export const CHARACTERS_CONFIG = {
     glow: "rgba(37, 99, 235, 0.55)",
     badgeText: "EXP-01",
     shapeLabel: "Quadrado Azul (Miguel)",
-    hasSprite: false, // Em refação: usa fallback de quadrado original
+    hasSprite: false,
     sheetUrl: null,
     animations: null,
   },
@@ -42,7 +32,7 @@ export const CHARACTERS_CONFIG = {
     hasSprite: true,
     sheetUrl: "/sprites/spritesheet_amelia.png",
     animations: {
-      // Mapa parado: sprite de frente
+
       mapIdle: {
         frameDuration: 0.3,
         loop: true,
@@ -50,7 +40,7 @@ export const CHARACTERS_CONFIG = {
           { x: 504, y: 367, w: 201, h: 276, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Batalha parada: sprite de lado, virada para a direita (invertida para olhar em direção aos inimigos)
+
       battleIdle: {
         frameDuration: 0.3,
         loop: true,
@@ -59,7 +49,7 @@ export const CHARACTERS_CONFIG = {
           { x: 736, y: 367, w: 200, h: 278, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Corrida no mapa (4 frames) - orientação invertida para caminhar voltada para o sentido do movimento
+
       run: {
         frameDuration: 0.13,
         loop: true,
@@ -71,7 +61,7 @@ export const CHARACTERS_CONFIG = {
           { x: 424, y: 724, w: 144, h: 207, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Ataque em combate (3 frames)
+
       attack: {
         frameDuration: 0.12,
         loop: false,
@@ -81,7 +71,7 @@ export const CHARACTERS_CONFIG = {
           { x: 880, y: 732, w: 202, h: 202, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Dano recebido (4 frames)
+
       damage: {
         frameDuration: 0.11,
         loop: false,
@@ -107,7 +97,7 @@ export const CHARACTERS_CONFIG = {
     glow: "rgba(217, 119, 6, 0.55)",
     badgeText: "GRD-03",
     shapeLabel: "Quadrado Âmbar (Benjamin)",
-    hasSprite: false, // Em refação: usa fallback de quadrado original
+    hasSprite: false,
     sheetUrl: null,
     animations: null,
   },
@@ -128,7 +118,7 @@ export const CHARACTERS_CONFIG = {
     sheetUrl: "/sprites/spritesheet_z.png",
     idleUrl: "/sprites/sprite_z_idle.png",
     animations: {
-      // Mapa parado: usa sprite_z_idle de frente
+
       mapIdle: {
         frameDuration: 0.3,
         loop: true,
@@ -137,7 +127,7 @@ export const CHARACTERS_CONFIG = {
           { x: 94, y: 84, w: 1036, h: 1769, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Batalha parada: usa sprite_z_idle de frente
+
       battleIdle: {
         frameDuration: 0.3,
         loop: true,
@@ -146,7 +136,7 @@ export const CHARACTERS_CONFIG = {
           { x: 94, y: 84, w: 1036, h: 1769, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Corrida no mapa (linha 1: 6 frames)
+
       run: {
         frameDuration: 0.11,
         loop: true,
@@ -159,7 +149,7 @@ export const CHARACTERS_CONFIG = {
           { x: 1324, y: 33, w: 163, h: 282, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Ataque em combate (linha 2: 4 frames jogando granada)
+
       attack: {
         frameDuration: 0.13,
         loop: false,
@@ -170,7 +160,7 @@ export const CHARACTERS_CONFIG = {
           { x: 1086, y: 368, w: 265, h: 273, anchorX: 0.5, anchorY: 1.0 },
         ],
       },
-      // Dano recebido (linha 3: 2 frames)
+
       damage: {
         frameDuration: 0.14,
         loop: false,

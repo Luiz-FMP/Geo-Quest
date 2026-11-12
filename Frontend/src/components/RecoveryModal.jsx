@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 export default function RecoveryModal({
-  mode, // "esgotamento" | "morte" | null
+  mode,
   playerState,
   onSelectReturnDestination,
 }) {
@@ -252,4 +252,3 @@ export default function RecoveryModal({
     </div>
   );
 }
-

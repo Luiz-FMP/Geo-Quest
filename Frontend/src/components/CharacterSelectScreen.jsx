@@ -42,7 +42,7 @@ export default function CharacterSelectScreen({
             icon: cfg.icon,
           };
         });
-        // Garante que existam os 4 personagens se a API retornar menos
+
         if (mapped.length < 4) {
           const ids = new Set(mapped.map((m) => m.id));
           ORDERED_CHARACTERS.forEach((c) => {
@@ -62,7 +62,7 @@ export default function CharacterSelectScreen({
         setSlots(mapped);
       })
       .catch(() => {
-        // Mantém fallback local com os 4 personagens
+
       });
     return () => {
       active = false;
@@ -119,12 +119,13 @@ export default function CharacterSelectScreen({
           textAlign: "center",
         }}
       >
-        {coords
-          ? `Localização definida (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`
+        {coords &&
+        Number.isFinite(coords.lat ?? coords.latitude) &&
+        Number.isFinite(coords.lng ?? coords.longitude)
+          ? `Localização definida (${(coords.lat ?? coords.latitude).toFixed(4)}, ${(coords.lng ?? coords.longitude).toFixed(4)})`
           : "Selecione o personagem ativo para a sua jornada"}
       </p>
 
-      {/* 4 personagens alinhados na mesma linha */}
       <div
         style={{
           display: "grid",
@@ -246,7 +247,6 @@ export default function CharacterSelectScreen({
                 </div>
               )}
 
-              {/* Ícone do Personagem */}
               <div
                 style={{
                   width: 68,
@@ -272,7 +272,7 @@ export default function CharacterSelectScreen({
                     imageRendering: "pixelated",
                   }}
                   onError={(e) => {
-                    // Fallback para quadrado se a imagem falhar
+
                     e.currentTarget.style.display = "none";
                     if (e.currentTarget.parentNode) {
                       e.currentTarget.parentNode.style.background = visual.color;

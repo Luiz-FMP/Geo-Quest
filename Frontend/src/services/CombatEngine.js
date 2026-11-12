@@ -6,29 +6,12 @@ export const COMBAT_TYPES = {
   BOSS: "Boss",
 };
 
-/**
- * Configuração da fórmula de probabilidade de combate aleatório durante o deslocamento (Seção 9.1):
- * - A chance cresce linearmente conforme a distância total da rota em quilômetros.
- * - Taxa padrão: +25% por quilômetro percorrido (0.25 / km).
- * - Teto absoluto: 50% (0.50), atingido a partir de 2,0 km de rota.
- * - Distância mínima para elegibilidade: 0,03 km (30 metros).
- *
- * Fórmula: P(d) = min(0.50, max(0, d_km * 0.25))
- */
 export const RANDOM_ENCOUNTER_CONFIG = {
   chancePerKm: 0.25,
   maxProbability: 0.5,
   minDistanceKm: 0.03,
 };
 
-/**
- * Calcula a ordem de iniciativa do combate baseada no atributo Velocidade (Item 3).
- * Regras:
- * 1. Maior velocidade age primeiro (ordem decrescente de velocidade).
- * 2. Em caso de empate de velocidade:
- *    - O jogador age antes do inimigo;
- *    - Entre inimigos com a mesma velocidade, preserva a ordem original da ronda e depois o identificador/nome.
- */
 export function calcularOrdemIniciativa(personagem, inimigosRonda = []) {
   const participantes = [];
 
@@ -85,11 +68,6 @@ export function calculateRandomEncounterProbability(
   return Number(Math.min(config.maxProbability, Math.max(0, rawChance)).toFixed(4));
 }
 
-/**
- * Determina de forma única no início do deslocamento (evitando verificações por frame)
- * se ocorrerá um combate aleatório ("Emboscada") durante a rota e em qual passo do percurso
- * (entre 30% e 75% do caminho) o deslocamento será pausado.
- */
 export function planRouteRandomEncounter(
   distanceKm,
   totalSteps,
@@ -199,7 +177,6 @@ function buildFallbackCombatSession({
     };
   }
 
-  // Boss (shopping_mall)
   const capanga = pickRandomEnemy(" (Guarda)");
   const boss = {
     idInstancia: `${Math.random().toString(36).slice(2, 10)}`,
@@ -222,11 +199,6 @@ function buildFallbackCombatSession({
   };
 }
 
-/**
- * Inicia uma sessão de combate utilizando o endpoint existente POST /api/combate/iniciar
- * (CombatController / CombatService). Caso o servidor não esteja acessível, gera a sessão
- * com a mesma estrutura SessaoCombateDto.
- */
 export async function iniciarSessaoCombate({
   jogadorId = 1,
   tipoCombate = COMBAT_TYPES.RANDOM,
@@ -268,11 +240,8 @@ export async function iniciarSessaoCombate({
           return { ...data, placeId: data.placeId || placeId };
         }
       }
-    } catch {
-      // Tenta próxima URL ou fallback local
-    }
+    } catch { void 0; }
   }
 
   return buildFallbackCombatSession({ tipoCombate, nomeLocal, placeId });
 }
-

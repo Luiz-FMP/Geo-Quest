@@ -67,7 +67,6 @@ export default function CombatScreen({
   const [animacaoJogador, setAnimacaoJogador] = useState(false);
   const [danoRecebidoAnim, setDanoRecebidoAnim] = useState(false);
 
-  // Estados para as recompensas e histórico de inimigos derrotados
   const [inimigosDerrotadosHistorico, setInimigosDerrotadosHistorico] = useState([]);
   const [resultadoRecompensa, setResultadoRecompensa] = useState(null);
 
@@ -89,7 +88,6 @@ export default function CombatScreen({
     return Math.round(base * variacao);
   };
 
-  // Função que calcula as moedas e define o item aleatório ao vencer
   const processarFimDeCombate = (vitoria) => {
     if (!vitoria) {
       setResultadoRecompensa({ vitoria: false });
@@ -98,13 +96,13 @@ export default function CombatScreen({
 
     let totalMoedas = 0;
     inimigosDerrotadosHistorico.forEach((ini) => {
-      // Suporta tanto 'Tier' (maiúsculo do C#) quanto 'tier' (minúsculo)
+
       const tierInimigo = (ini.Tier || ini.tier || "Comum").toLowerCase();
 
       if (tierInimigo === "boss") {
-        totalMoedas += Math.floor(Math.random() * 21) + 60; // 60 a 80 moedas
+        totalMoedas += Math.floor(Math.random() * 21) + 60;
       } else if (tierInimigo === "miniboss" || tierInimigo === "elite") {
-        totalMoedas += Math.floor(Math.random() * 11) + 20; // 20 a 30 moedas
+        totalMoedas += Math.floor(Math.random() * 11) + 20;
       } else {
         const baseNormal = 5;
         const bonusArena = sessaoCombate.tipoCombate === "Arena" ? 3 : 0;
@@ -116,10 +114,9 @@ export default function CombatScreen({
       totalMoedas = sessaoCombate.tipoCombate === "Boss" ? 70 : sessaoCombate.tipoCombate === "Arena" ? 25 : 10;
     }
 
-    // Certeza de item se for Arena (3 rondas), senão 40% de chance
     const ganhaItemCerteza = sessaoCombate.tipoCombate === "Arena";
     const ganhouItem = ganhaItemCerteza || Math.random() <= 0.40;
-    
+
     const itensPool = ["Poção Menor", "Cristal de Mana", "Fragmento Antigo", "Erva Medicinal"];
     const itemNome = ganhouItem ? itensPool[Math.floor(Math.random() * itensPool.length)] : null;
 
@@ -172,7 +169,6 @@ export default function CombatScreen({
     }, 750);
   };
 
-  // No início do combate (Ronda 1), se houver inimigos com maior Velocidade que o jogador, eles agem primeiro
   const aberturaRondaZeroExecutadaRef = useRef(false);
   useEffect(() => {
     if (aberturaRondaZeroExecutadaRef.current) return;
@@ -185,11 +181,11 @@ export default function CombatScreen({
   const verificarEstadoInimigos = (listaAtualizada, escudoAtivo = false) => {
     const vivos = listaAtualizada.filter((i) => i.vidaAtual > 0);
     const mortosNestaRodada = listaAtualizada.filter((i) => i.vidaAtual === 0);
-    
+
     setInimigosDerrotadosHistorico((prev) => [...prev, ...mortosNestaRodada]);
 
     if (vivos.length === 0) {
-      // 🛑 Trava o turno imediatamente para evitar dano atrasado do inimigo
+
       setTurnoBloqueado(true);
 
       const proximaRonda = rondaIndex + 1;
@@ -322,7 +318,7 @@ export default function CombatScreen({
         fontFamily: "'IBM Plex Mono', monospace",
       }}
     >
-      {/* CABEÇALHO DA BATALHA */}
+
       <div
         style={{
           padding: "14px 28px",
@@ -350,7 +346,6 @@ export default function CombatScreen({
         </div>
       </div>
 
-      {/* ARENA VISUAL (METADE SUPERIOR) */}
       <CombatArena
         personagem={personagem}
         tipoCombate={sessaoCombate.tipoCombate}
@@ -366,7 +361,6 @@ export default function CombatScreen({
         onSelectAlvo={setAlvoIndex}
       />
 
-      {/* PAINEL DE CONTROLOS E LOGS (METADE INFERIOR) */}
       <CombatHUD
         personagem={personagem}
         energiaJogador={energiaJogador}
@@ -380,7 +374,6 @@ export default function CombatScreen({
         onFugir={handleFugir}
       />
 
-      {/* MODAL DE RECOMPENSAS AO FINALIZAR O COMBATE */}
       <CombatRewardModal
         recompensa={resultadoRecompensa}
         onClaim={() => {

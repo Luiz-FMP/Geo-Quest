@@ -8,10 +8,11 @@
 
 - [`Backend/`](./Backend): API HTTP em C# / ASP.NET Core (`.NET 10`) com persistência relacional **SQLite** (`geoquest.db`) e integração com Google Places API (New) e Google Directions API.
 - [`Frontend/`](./Frontend): Aplicação web interativa em **React 19 + Vite** integrada ao Google Maps JavaScript API (`@vis.gl/react-google-maps`).
-- [`Documentação/`](./docs): Documentação do projeto em português e em inglês:
-  - [`Documentação/ESTRUTURA_DO_PROJETO.md`](./docs/ESTRUTURA_DO_PROJETO.md) — Mapa detalhado de todas as pastas, componentes, serviços, controllers e modelos.
-  - [`Documentação/CONTEXTO_DO_PROJETO.md`](./docs/CONTEXTO_DO_PROJETO.md) — Visão consolidada da arquitetura e funcionalidades implementadas.
-  - [`docs/PROJECT_CONTEXT.md`](./docs/PROJECT_CONTEXT.md): Contexto técnico e de produto do repositório.
+- [`docs/`](./docs): Documentação oficial do projeto:
+  - [`docs/CONTEXTO_DO_PROJETO.md`](./docs/CONTEXTO_DO_PROJETO.md) — Visão consolidada da arquitetura, regras de negócio, fórmulas, categorias de Places e orientações para agentes de desenvolvimento.
+  - [`docs/ESTRUTURA_DO_PROJETO.md`](./docs/ESTRUTURA_DO_PROJETO.md) — Mapa detalhado de todas as pastas, componentes, serviços, controllers e entidades do repositório.
+
+> **Orientação para Agentes de Desenvolvimento:** Todo agente deve consultar [`docs/CONTEXTO_DO_PROJETO.md`](./docs/CONTEXTO_DO_PROJETO.md) e [`docs/ESTRUTURA_DO_PROJETO.md`](./docs/ESTRUTURA_DO_PROJETO.md) antes de iniciar qualquer alteração no código e atualizar os documentos afetados ao final da tarefa.
 
 ---
 
@@ -38,4 +39,14 @@ dotnet run --project Backend/GeoQuest.Api.csproj
 cd Frontend
 npm install
 npm run dev
+```
+
+---
+
+## Validação e Build
+
+```powershell
+dotnet build Backend/GeoQuest.Api.csproj
+npm --prefix Frontend run lint
+npm --prefix Frontend run build
 ```
